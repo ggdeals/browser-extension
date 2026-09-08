@@ -74,16 +74,37 @@ The `--debug=false` flag is optional. The shorter equivalent is:
 npm run build:all
 ```
 
-Production builds are generated in `dist/prod/chrome/` and `dist/prod/firefox/`.
+Production builds are generated in `dist/gg.deals_chrome/` and
+`dist/gg.deals_firefox/`.
 
-To create debug builds for both browsers without changing the default GG.deals domains:
+### Building against another site
+
+`--site` points a build at a different installation. It sets both the domain used
+in `manifest.json` and the site URLs used in the code, so the two can never drift
+apart:
 
 ```bash
-npm run build -- --debug=true --target=all
+npm run build:all -- --site=example.com
 ```
 
-These builds are generated in `dist/dev/dev_default/chrome/` and
-`dist/dev/dev_default/firefox/`.
+It also accepts an installation path, for setups served from a subdirectory:
+
+```bash
+npm run build:all -- --site=example.com/subdir/
+```
+
+Output directories follow the `dist/<site>_<target>/` pattern, so the builds above
+generate `dist/example.com_chrome/` and `dist/example.com_subdir_chrome/`
+respectively (plus the matching `_firefox` directories).
+
+To create debug builds for both browsers without changing the default GG.deals site:
+
+```bash
+npm run build:all -- --debug=true
+```
+
+Debug builds add a `debug_` prefix, so these are generated in
+`dist/debug_gg.deals_chrome/` and `dist/debug_gg.deals_firefox/`.
 
 ## Development Mode
 
@@ -106,7 +127,7 @@ npm run build:chrome
 2. Open Chrome and go to chrome://extensions.
 3. Enable Developer mode.
 4. Click Load unpacked.
-5. Select the `dist/prod/chrome/` folder.
+5. Select the `dist/gg.deals_chrome/` folder.
 
 ## Load the Extension in Firefox (Temporary Add-on)
 
@@ -119,7 +140,7 @@ npm run build:firefox
 2. Open Firefox and go to about:debugging.
 3. Click This Firefox.
 4. Click Load Temporary Add-on.
-5. Select `dist/prod/firefox/manifest.json`.
+5. Select `dist/gg.deals_firefox/manifest.json`.
 
 ## Permissions and Hosts
 

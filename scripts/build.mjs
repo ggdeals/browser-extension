@@ -1,6 +1,16 @@
-import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import {dirname, join, relative} from 'node:path';
 import process from 'node:process';
 
 const ROOT_DIR = process.cwd();
@@ -23,7 +33,23 @@ const ICON_ASSET_FILES = [
   'gg-ext-icon-128_gray.png',
 ];
 
-const DEFAULT_MANIFEST_DOMAIN = 'gg.deals';
+const DEFAULT_SITE = 'gg.deals';
+const PACKAGE_JSON_PATH = join(ROOT_DIR, 'package.json');
+// Chrome allows 1-4 dot-separated integers up to 65535 each and Firefox up to
+// 9 digits each, so every version has to fit Chrome's limit.
+const VERSION_PART_MAX = 65535;
+// gg.deals gates features on the extension version, so a dev build cannot carry
+// an invented number. It reuses the three leading parts of the highest released
+// version and only moves the fourth one.
+const REPO_URL = 'https://github.com/ggdeals/browser-extension.git';
+const VERSION_BASE_PART_COUNT = 3;
+// The fourth part counts whole hours since this epoch: rebuilds within the same
+// hour keep the same version, and every later build sorts above the earlier
+// ones. The counter reaches 65535 in July 2033 - move the epoch forward before
+// then (the base version will have moved on long before, so nothing regresses).
+const DEV_VERSION_EPOCH_MS = Date.UTC(2026, 0, 1);
+const HOUR_MS = 60 * 60 * 1000;
+const GIT_LOOKUP_TIMEOUT_MS = 10_000;
 const DEBUG_ONLY_BLOCK_PATTERN = /\s*<!-- DEBUG_ONLY_START -->[\s\S]*?<!-- DEBUG_ONLY_END -->/g;
 const FIREFOX_REQUIRED_DATA_COLLECTION_PERMISSIONS = [
   'authenticationInfo', // GG.deals API keys and Epic OAuth tokens
@@ -34,43 +60,32 @@ const FIREFOX_REQUIRED_DATA_COLLECTION_PERMISSIONS = [
 ];
 
 function parseArgs(argv) {
-  let manifestDomain;
-  let constantsDomain;
+  let site;
   let debug;
+  let version;
+  let versionBase;
   let target = 'firefox';
-
-  const positional = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
 
-    if (arg.startsWith('--manifest-domain=')) {
-      manifestDomain = arg.slice('--manifest-domain='.length);
-      continue;
-    }
-
-    if (arg.startsWith('--manifest=')) {
-      manifestDomain = arg.slice('--manifest='.length);
-      continue;
-    }
-
-    if (arg.startsWith('--global=')) {
-      manifestDomain = arg.slice('--global='.length);
-      continue;
-    }
-
-    if (arg.startsWith('--constants-domain=')) {
-      constantsDomain = arg.slice('--constants-domain='.length);
-      continue;
-    }
-
-    if (arg.startsWith('--constants=')) {
-      constantsDomain = arg.slice('--constants='.length);
+    if (arg.startsWith('--site=')) {
+      site = arg.slice('--site='.length);
       continue;
     }
 
     if (arg.startsWith('--debug=')) {
       debug = arg.slice('--debug='.length);
+      continue;
+    }
+
+    if (arg.startsWith('--version=')) {
+      version = arg.slice('--version='.length);
+      continue;
+    }
+
+    if (arg.startsWith('--version-base=')) {
+      versionBase = arg.slice('--version-base='.length);
       continue;
     }
 
@@ -100,8 +115,18 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (!arg.startsWith('--')) {
-      positional.push(arg);
+    // Unknown flags used to be ignored silently, which produced builds that
+    // looked fine but pointed at the wrong site.
+    if (arg.startsWith('--')) {
+      throw new Error(
+        `Unknown build flag "${arg}". Supported flags: --site=<domain[/path]>, `
+        + '--target=<chrome|firefox|all>, --debug[=true|false], --version=<x.y.z>, '
+        + '--version-base=<x.y.z>.',
+      );
+    }
+
+    if (site === undefined) {
+      site = arg;
     }
   }
 
@@ -109,19 +134,26 @@ function parseArgs(argv) {
     debug = process.env.npm_config_debug;
   }
 
-  if (!manifestDomain && positional.length > 0) {
-    manifestDomain = positional[0];
+  if (!version && typeof process.env.EXT_VERSION === 'string' && process.env.EXT_VERSION.trim().length > 0) {
+    version = process.env.EXT_VERSION;
   }
 
-  if (!constantsDomain && positional.length > 1) {
-    constantsDomain = positional[1];
+  if (!versionBase && typeof process.env.EXT_VERSION_BASE === 'string' && process.env.EXT_VERSION_BASE.trim().length > 0) {
+    versionBase = process.env.EXT_VERSION_BASE;
+  }
+
+  if (![...BUILD_TARGETS, 'all'].includes(target)) {
+    throw new Error(
+        `"${target}" must be chrome, firefox or all.`,
+    );
   }
 
   return {
-    manifestDomain: manifestDomain?.trim() || undefined,
-    constantsDomain: constantsDomain?.trim() || undefined,
+    site: site?.trim() || undefined,
     debug: debug?.trim() || undefined,
-    target: [...BUILD_TARGETS, 'all'].includes(target) ? target : 'firefox',
+    version: version?.trim() || undefined,
+    versionBase: versionBase?.trim() || undefined,
+    target: target,
   };
 }
 
@@ -133,34 +165,208 @@ function normalizeDebugFlag(rawDebug) {
   return ['1', 'true', 'yes', 'on'].includes(rawDebug.toLowerCase()) ? 'true' : 'false';
 }
 
-function resolveBuildName(manifestDomain, constantsDomain) {
-  const rawDomain = manifestDomain ?? constantsDomain;
+function assertValidExtensionVersion(version, storeLabel) {
+  const parts = version.split('.');
+  const isValid = /^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$/.test(version)
+    && parts.every((part) => Number(part) <= VERSION_PART_MAX)
+    && parts.some((part) => Number(part) !== 0);
 
-  if (!rawDomain) {
-    return 'default';
+  if (!isValid) {
+    throw new Error(
+      `Invalid extension version "${version}" for ${storeLabel}. Expected 1-4 dot-separated `
+      + `integers, each between 0 and ${VERSION_PART_MAX}, without leading zeros, and not all zero.`,
+    );
   }
-
-  let hostname = rawDomain;
-
-  try {
-    hostname = new URL(rawDomain.includes('://') ? rawDomain : `https://${rawDomain}`).hostname;
-  } catch {
-    // Fall back to sanitizing the raw value below.
-  }
-
-  const firstDomainPart = hostname.split('.')[0].toLowerCase();
-  return firstDomainPart.replace(/[^a-z0-9_-]+/g, '-') || 'default';
 }
 
-function resolveOutputDirs(targets, debugEnabled, manifestDomain, constantsDomain) {
-  const baseOutDir = debugEnabled
-    ? join(DIST_DIR, 'dev', `dev_${resolveBuildName(manifestDomain, constantsDomain)}`)
-    : join(DIST_DIR, 'prod');
+function parseVersionParts(rawVersion) {
+  const match = /^v?(\d+(?:\.\d+){0,3})$/.exec(String(rawVersion).trim());
+
+  return match ? match[1].split('.').map(Number) : null;
+}
+
+function compareVersionParts(left, right) {
+  const length = Math.max(left.length, right.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
+}
+
+function highestVersionParts(rawVersions) {
+  let highest = null;
+
+  for (const rawVersion of rawVersions) {
+    const parts = parseVersionParts(rawVersion);
+
+    if (parts && (!highest || compareVersionParts(parts, highest) > 0)) {
+      highest = parts;
+    }
+  }
+
+  return highest;
+}
+
+function captureCommand(command, args) {
+  const result = spawnSync(command, args, {
+    cwd: ROOT_DIR,
+    encoding: 'utf-8',
+    timeout: GIT_LOOKUP_TIMEOUT_MS,
+    env: {
+      ...process.env,
+      // A missing or unreachable remote must fail instead of asking for
+      // credentials in the middle of a build.
+      GIT_TERMINAL_PROMPT: '0',
+    },
+  });
+
+  return result.status === 0 && typeof result.stdout === 'string' ? result.stdout : null;
+}
+
+function listGitTags(args) {
+  const output = captureCommand('git', args);
+
+  if (output === null) {
+    return [];
+  }
+
+  return output
+    .split('\n')
+    .map((line) => line.split('refs/tags/').pop().trim())
+    .filter((tag) => tag.length > 0);
+}
+
+function normalizeVersionBase(parts) {
+  return Array.from({ length: VERSION_BASE_PART_COUNT }, (_, index) => parts[index] ?? 0);
+}
+
+// The published tags are the source of truth for the released version; local
+// tags and package.json only keep builds working without network access.
+function resolveVersionBase(baseOverride) {
+  if (baseOverride) {
+    const parts = parseVersionParts(baseOverride);
+
+    if (!parts) {
+      throw new Error(
+        `Invalid version base "${baseOverride}". Expected 1-4 dot-separated integers.`,
+      );
+    }
+
+    return normalizeVersionBase(parts);
+  }
+
+  const releasedVersion = highestVersionParts(
+    listGitTags(['ls-remote', '--tags', '--refs', REPO_URL]),
+  );
+
+  if (releasedVersion) {
+    return normalizeVersionBase(releasedVersion);
+  }
+
+  const fallbackVersion = highestVersionParts(listGitTags(['tag', '--list']))
+    ?? parseVersionParts(JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8')).version ?? '');
+
+  if (!fallbackVersion) {
+    throw new Error(
+      `Could not read the released version from ${REPO_URL}. Pass `
+      + '--version-base=<x.y.z> (or set EXT_VERSION_BASE) to build without network access.',
+    );
+  }
+
+  console.warn(
+    `Could not read the tags of ${REPO_URL}, falling back to the local version `
+    + `${fallbackVersion.join('.')}. The dev build may be older than the released extension.`,
+  );
+
+  return normalizeVersionBase(fallbackVersion);
+}
+
+function buildDevVersion(now, versionBase) {
+  const hoursSinceEpoch = Math.floor((now.getTime() - DEV_VERSION_EPOCH_MS) / HOUR_MS);
+
+  if (hoursSinceEpoch < 0 || hoursSinceEpoch > VERSION_PART_MAX) {
+    throw new Error(
+      `Cannot build a dev version for ${now.toISOString()}: ${hoursSinceEpoch} hours since the `
+      + `dev version epoch do not fit in a version part (0-${VERSION_PART_MAX}). Move `
+      + 'DEV_VERSION_EPOCH_MS in scripts/build.mjs forward.',
+    );
+  }
+
+  return [...versionBase, hoursSinceEpoch].join('.');
+}
+
+function resolveVersion(versionOverride, versionBaseOverride) {
+  const version = versionOverride
+    ?? buildDevVersion(new Date(), resolveVersionBase(versionBaseOverride));
+
+  // Chrome and Firefox share the version, so it has to satisfy the stricter of
+  // the two stores.
+  assertValidExtensionVersion(version, 'the extension stores');
+
+  return version;
+}
+
+function applyVersion(manifestPath, version) {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+
+  manifest.version = version;
+
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+}
+
+// A single --site value drives every domain the build depends on. It accepts a
+// bare domain ("example.com") or a domain with an installation path
+// ("example.com/branch"), with or without a scheme.
+//
+//   domain -> replaces the domain in manifest.json (host permissions, matches)
+//   base   -> replaces the domain and path of the site URLs used in the code
+function resolveSite(rawSite) {
+  const value = rawSite ?? DEFAULT_SITE;
+
+  let url;
+
+  try {
+    url = new URL(value.includes('://') ? value : `https://${value}`);
+  } catch {
+    throw new Error(
+      `Invalid --site value "${value}". Expected a domain with an optional path, `
+      + 'for example example.com or example.com/branch.',
+    );
+  }
+
+  if (!url.hostname) {
+    throw new Error(`Invalid --site value "${value}". A domain is required.`);
+  }
+
+  const domain = url.hostname.toLowerCase();
+  const basePath = url.pathname.replace(/\/+$/, '');
+  const base = `${domain}${basePath}`;
+
+  return {
+    domain,
+    base,
+    isDefault: base === DEFAULT_SITE,
+    // Used as the dist directory name, so the path has to survive as well:
+    // example.com/branch -> example.com_branch
+    name: base.replace(/[^a-z0-9_.-]+/g, '_'),
+  };
+}
+
+// Output directories are flat and self-describing: dist/<domain>_<target>,
+// prefixed with debug_ for debug builds. For example dist/gg.deals_chrome.
+function resolveOutputDirs(targets, debugEnabled, site) {
+  const prefix = debugEnabled ? 'debug_' : '';
 
   return Object.fromEntries(
     targets.map((buildTarget) => [
       buildTarget,
-      join(baseOutDir, buildTarget),
+      join(DIST_DIR, `${prefix}${site.name}_${buildTarget}`),
     ]),
   );
 }
@@ -244,7 +450,7 @@ function normalizeGeneratedFileNames(outputDir) {
   const renamedFiles = [];
 
   for (const filePath of walkFiles(outputDir)) {
-    const normalizedPath = filePath.replace(/\.(?:[cm]?[jt]s)-loader\.js$/, '-loader.js');
+    const normalizedPath = filePath.replace(/\.[cm]?[jt]s-loader\.js$/, '-loader.js');
 
     if (normalizedPath === filePath) {
       continue;
@@ -340,7 +546,7 @@ function walkFiles(dirPath) {
   return files;
 }
 
-function replaceConstantsDomain(constantsDomain, outputDir, sourceDomains) {
+function replaceSiteUrls(siteBase, outputDir, sourceDomains) {
   const targetExtensions = new Set(['.js', '.html', '.css', '.json']);
   const files = walkFiles(outputDir);
 
@@ -353,10 +559,10 @@ function replaceConstantsDomain(constantsDomain, outputDir, sourceDomains) {
     let updatedContent = content;
 
     for (const sourceDomain of sourceDomains) {
-      updatedContent = replaceDomainInHttpUrls(updatedContent, sourceDomain, constantsDomain);
+      updatedContent = replaceDomainInHttpUrls(updatedContent, sourceDomain, siteBase);
     }
 
-    updatedContent = replaceDomainInHttpUrls(updatedContent, DEFAULT_MANIFEST_DOMAIN, constantsDomain);
+    updatedContent = replaceDomainInHttpUrls(updatedContent, DEFAULT_SITE, siteBase);
 
     if (updatedContent !== content) {
       writeFileSync(filePath, updatedContent, 'utf-8');
@@ -471,17 +677,13 @@ function patchExtensionUrlsForFirefox(outputDir) {
 }
 
 function main() {
-  const { manifestDomain, constantsDomain, debug, target } = parseArgs(process.argv.slice(2));
-  const hasOverrides = Boolean(manifestDomain || constantsDomain);
+  const { site: rawSite, debug, target, version, versionBase } = parseArgs(process.argv.slice(2));
+  const site = resolveSite(rawSite);
   const sourceConstantsDomains = extractConstantsDomains();
   const targets = target === 'all' ? BUILD_TARGETS : [target];
+  const resolvedVersion = resolveVersion(version, versionBase);
   const debugEnabled = normalizeDebugFlag(debug) === 'true';
-  const outputDirs = resolveOutputDirs(
-    targets,
-    debugEnabled,
-    manifestDomain,
-    constantsDomain,
-  );
+  const outputDirs = resolveOutputDirs(targets, debugEnabled, site);
   const buildOutDir = outputDirs[targets[0]];
 
   for (const outDir of Object.values(outputDirs)) {
@@ -497,9 +699,8 @@ function main() {
     VITE_BOTTOM_BAR_DEBUG: String(debugEnabled),
   };
 
-  if (manifestDomain) {
-    const customManifestPath = prepareCustomManifest(manifestDomain);
-    viteEnv.MANIFEST_PATH = customManifestPath;
+  if (!site.isDefault) {
+    viteEnv.MANIFEST_PATH = prepareCustomManifest(site.domain);
   }
 
   runCommand('npx', ['vite', 'build'], viteEnv);
@@ -508,12 +709,11 @@ function main() {
   normalizeOutputAssetPaths(buildOutDir);
   normalizeGeneratedFileNames(buildOutDir);
 
-  if (hasOverrides && manifestDomain) {
-    replaceManifestDomain(manifestDomain, buildOutDir);
-  }
-
-  if (hasOverrides && constantsDomain) {
-    replaceConstantsDomain(constantsDomain, buildOutDir, sourceConstantsDomains);
+  // Both replacements are driven by the same --site value, so the manifest and
+  // the URLs used in the code can never disagree.
+  if (!site.isDefault) {
+    replaceManifestDomain(site.domain, buildOutDir);
+    replaceSiteUrls(site.base, buildOutDir, sourceConstantsDomains);
   }
 
   for (const buildTarget of targets.slice(1)) {
@@ -522,6 +722,8 @@ function main() {
 
   for (const buildTarget of targets) {
     const manifestOutputPath = join(outputDirs[buildTarget], 'manifest.json');
+    applyVersion(manifestOutputPath, resolvedVersion);
+
     if (buildTarget === 'chrome') {
       patchManifestForChrome(manifestOutputPath);
     } else {
@@ -531,6 +733,8 @@ function main() {
   }
 
   rmSync(TMP_DIR, { recursive: true, force: true });
+
+  console.log(`Built extension ${resolvedVersion} for ${site.base}: ${targets.join(', ')}.`);
 }
 
 main();
