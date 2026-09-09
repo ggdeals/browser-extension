@@ -304,5 +304,8 @@
   },
   "barChangeAppearance": {
     "message": "Ändra utseende"
+  },
+  "barPriceSettings": {
+    "message": "Prisinställningar"
   }
 }

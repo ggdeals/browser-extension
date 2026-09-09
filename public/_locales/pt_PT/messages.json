@@ -304,5 +304,8 @@
   },
   "barChangeAppearance": {
     "message": "Alterar aspeto"
+  },
+  "barPriceSettings": {
+    "message": "Definições de preços"
   }
 }

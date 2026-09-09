@@ -1206,6 +1206,18 @@ export function onBottomBarInjected(barElement: HTMLElement): void {
         });
     }
 
+    const priceSettings = document.querySelector<HTMLElement>('#gg-price-settings');
+    if (priceSettings) {
+        priceSettings.addEventListener('click', (): void => {
+            const wrapper = document.querySelector<HTMLElement>('#gg-bar-options');
+            if (wrapper) {
+                wrapper.classList.toggle('open');
+            }
+
+            void browser.runtime.sendMessage({ type: 'OPEN_POPUP', tab: 'settings' });
+        });
+    }
+
     const alwaysHide = document.querySelector<HTMLElement>('#gg-always-hide');
     if (alwaysHide) {
         alwaysHide.addEventListener('click', (): void => {

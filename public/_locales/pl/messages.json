@@ -304,5 +304,8 @@
   },
   "barChangeAppearance": {
     "message": "Zmień wygląd"
+  },
+  "barPriceSettings": {
+    "message": "Ustawienia cen"
   }
 }

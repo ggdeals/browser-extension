@@ -304,5 +304,8 @@
   },
   "barChangeAppearance": {
     "message": "Athraigh an chuma"
+  },
+  "barPriceSettings": {
+    "message": "Socruithe praghsanna"
   }
 }
