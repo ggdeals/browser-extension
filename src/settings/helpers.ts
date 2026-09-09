@@ -6,8 +6,6 @@ export {
     GGInvalidApiKeyError,
     SIGNED_OUT_EXTENSION_SETTINGS,
     SIGNED_OUT_GG_USER_SETTINGS,
-    fetchGGUserSettings,
-    fetchGuestGGUserSettings,
     getGGApiKey,
     hasGGUserSettingsData,
     isInvalidApiKeyResponse,
@@ -20,8 +18,10 @@ export {
     saveAppearanceSettings,
     saveExcludedWebsites,
     saveGGUserSettings,
+    saveGGUserSettingsToLocalStorage,
     saveSettings,
     signOutFromExtensionMemory,
+    requestGGUserSettingsSync,
     withGGApiKeyHeader
 } from '../utils/extension-settings';
 export type {
@@ -31,6 +31,7 @@ export type {
     GGGamePrice,
     GGPayloadMessage,
     GGUserSettingsData,
+    GGUserSettingsSyncOptions,
     RegionCurrency,
     SettingsAppearanceData,
     SettingsData
@@ -150,7 +151,7 @@ export type ExtensionSettingsProps = {
 
 export type SettingsTabProps = {
     platform: string;
-    regionCurrency: RegionCurrency;
+    regionCurrency: RegionCurrency | null;
     keyshopsEnabled: boolean;
     barEnabled: boolean;
     showBlacklistAlert: boolean;

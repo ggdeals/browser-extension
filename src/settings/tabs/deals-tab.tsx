@@ -35,7 +35,6 @@ export type DealGroup = {
 type DealsTabProps = {
     userSettings: GGUserSettingsData | null;
     platform: string;
-    regionCurrency: string;
     keyshopsEnabled: boolean;
     isSyncingUserSettings: boolean;
     onSignInClick?: () => void;
@@ -61,35 +60,32 @@ function mapSettingsPlatformToDealsPlatform(platform: string): string {
     return normalizedPlatform;
 }
 
-function mapRegionCurrencyToDealsRegion(regionCurrency: string): string {
-    const normalizedRegionCurrency = regionCurrency.trim().toLowerCase();
-    const [_, regionCode] = normalizedRegionCurrency.split('-');
-
-    if (regionCode && regionCode.length > 0) {
-        return regionCode;
-    }
-
-    return 'eu';
-}
-
-export function DealsTab({ userSettings, platform, regionCurrency, keyshopsEnabled, isSyncingUserSettings, onSignInClick, onApiKeyInvalid, onEmailUnverified }: DealsTabProps) {
+export function DealsTab({ userSettings, platform, keyshopsEnabled, isSyncingUserSettings, onSignInClick, onApiKeyInvalid, onEmailUnverified }: DealsTabProps) {
     const [deals, setDeals] = useState<DealGroup[]>([]);
     const [loading, setLoading] = useState(true);
     const isLoggedIn = hasGGUserSettingsData(userSettings);
 
-    const dealsRegion = userSettings?.region?.trim().toLowerCase() || mapRegionCurrencyToDealsRegion(regionCurrency);
+    // Use only the region from extensionData/user
+    const dealsRegion = userSettings?.region?.trim().toLowerCase() || null;
     const dealsPlatform = userSettings?.platform?.trim().toLowerCase() || mapSettingsPlatformToDealsPlatform(platform);
     const showKeyshops = typeof userSettings?.showKeyshops === 'boolean' ? userSettings.showKeyshops : keyshopsEnabled;
     const dealsUrl = useMemo(() => (
-        DEALS_URL
+        dealsRegion
+            ? DEALS_URL
             .replace('{region}', dealsRegion)
             .replace('{platform}', dealsPlatform)
             .replace('{showKeyshops}', showKeyshops ? '1' : '0')
+            : null
     ), [dealsRegion, dealsPlatform, showKeyshops]);
     const latestRequestId = useRef(0);
 
     useEffect(() => {
         setLoading(true);
+
+        if (!dealsUrl) {
+            return;
+        }
+
         let isCancelled = false;
         const requestId = latestRequestId.current + 1;
         latestRequestId.current = requestId;

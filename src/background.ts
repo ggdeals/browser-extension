@@ -23,8 +23,17 @@ import {
   SYNC_PAGINATION_PROGRESS_MESSAGE,
 } from './utils/sync-helpers';
 import {
+  fetchGGUserSettings,
+  fetchGuestGGUserSettings,
+  GGInvalidApiKeyError,
+  hasGGUserSettingsData,
   loadCustomMessagesFromChromeStorage,
+  loadGGUserSettingsFromChromeStorage,
   processExtensionResponse,
+  saveGGUserSettingsToChromeStorage,
+  SYNC_GG_USER_SETTINGS_MESSAGE,
+  type GGUserSettingsData,
+  type GGUserSettingsSyncOptions,
 } from './utils/extension-settings';
 import {
   GG_CUSTOM_MESSAGES,
@@ -105,12 +114,18 @@ type UpdateBadgeMessage = {
   isBlacklisted: boolean;
 };
 
-type BackgroundMessage = FetchSteamMessage | FetchSteamAccountNameMessage | PostImportDataMessage | FetchEpicTokenMessage | RefreshEpicTokenMessage | FetchEpicLibraryItemsMessage | FetchPlaystationWishlistMessage | FetchPlaystationAccountMessage | FetchPlaystationCollectionMessage | OpenUrlInNewTabMessage | FetchTestGameDataMessage | OpenPopupMessage | UpdateBadgeMessage;
+type SyncGGUserSettingsMessage = {
+  type: typeof SYNC_GG_USER_SETTINGS_MESSAGE;
+  options?: GGUserSettingsSyncOptions;
+};
+
+type BackgroundMessage = FetchSteamMessage | FetchSteamAccountNameMessage | PostImportDataMessage | FetchEpicTokenMessage | RefreshEpicTokenMessage | FetchEpicLibraryItemsMessage | FetchPlaystationWishlistMessage | FetchPlaystationAccountMessage | FetchPlaystationCollectionMessage | OpenUrlInNewTabMessage | FetchTestGameDataMessage | OpenPopupMessage | UpdateBadgeMessage | SyncGGUserSettingsMessage;
 
 type RuntimeMessageResponse = {
   ok: boolean;
   data?: unknown;
   error?: string;
+  errorCode?: 'INVALID_API_KEY';
   status?: number;
 };
 
@@ -183,6 +198,59 @@ function getPositiveInteger(value: unknown): number | null {
   }
 
   return Math.floor(value);
+}
+
+const ggUserSettingsSyncs = new Map<string, Promise<GGUserSettingsData>>();
+let ggUserSettingsSyncQueue: Promise<void> = Promise.resolve();
+
+function synchronizeGGUserSettings(options: GGUserSettingsSyncOptions = {}): Promise<GGUserSettingsData> {
+  const syncKey = JSON.stringify(options);
+  const pendingSync = ggUserSettingsSyncs.get(syncKey);
+  if (pendingSync) {
+    return pendingSync;
+  }
+
+  const sync = ggUserSettingsSyncQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const existingUserSettings = await loadGGUserSettingsFromChromeStorage();
+      const mode = options.mode ?? 'auto';
+
+      // "auto" keeps a complete cached value and only fetches when there's no region yet
+      if (mode === 'auto' && existingUserSettings?.region?.trim()) {
+        return existingUserSettings;
+      }
+
+      const useGuestRequest = mode === 'guest'
+        || (mode === 'auto' && !hasGGUserSettingsData(existingUserSettings));
+      const freshUserSettings = useGuestRequest
+        ? await fetchGuestGGUserSettings()
+        : await fetchGGUserSettings(existingUserSettings, {
+            includeApiKeyHeader: options.includeApiKeyHeader ?? true,
+            credentials: 'include',
+          });
+
+      if (options.requireAuthenticated && !hasGGUserSettingsData(freshUserSettings)) {
+        return freshUserSettings;
+      }
+
+      const nextUserSettings: GGUserSettingsData = {
+        ...freshUserSettings,
+        ...options.overrides,
+      };
+      await saveGGUserSettingsToChromeStorage(nextUserSettings);
+      return nextUserSettings;
+    });
+
+  ggUserSettingsSyncs.set(syncKey, sync);
+  ggUserSettingsSyncQueue = sync.then(() => undefined, () => undefined);
+  void sync.finally(() => {
+    if (ggUserSettingsSyncs.get(syncKey) === sync) {
+      ggUserSettingsSyncs.delete(syncKey);
+    }
+  }).catch(() => undefined);
+
+  return sync;
 }
 
 function sendPaginationProgressToTab(tabId: number | undefined, progress: PaginationProgress): void {
@@ -1057,6 +1125,25 @@ async function fetchPlaystationCollectionWithPagination(url: string, reportProgr
 browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { tab?: { id?: number } }): Promise<RuntimeMessageResponse | void> => {
   const message = rawMessage as BackgroundMessage;
   console.log('[gg.deals-extension][background] message received:', message?.type);
+
+  if (message?.type === SYNC_GG_USER_SETTINGS_MESSAGE) {
+    try {
+      const userSettings = await synchronizeGGUserSettings(message.options);
+      return { ok: true, data: userSettings };
+    } catch (error) {
+      if (error instanceof GGInvalidApiKeyError) {
+        return {
+          ok: false,
+          error: error.message,
+          errorCode: 'INVALID_API_KEY',
+        };
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[gg.deals-extension][background] SYNC_GG_USER_SETTINGS error:', error);
+      return { ok: false, error: errorMessage };
+    }
+  }
 
   if (message?.type === 'FETCH_STEAM_USERDATA') {
     try {

@@ -108,9 +108,9 @@ export function SettingsTab(props: SettingsTabProps) {
                     <CustomDropdown
                         id="settings-region-currency"
                         name="settings-region-currency"
-                        currentValue={props.regionCurrency}
+                        currentValue={props.regionCurrency ?? ''}
                         options={regionCurrencyOptions}
-                        onChange={(value) => props.onRegionCurrencyChange(value as SettingsData['regionCurrency'])}
+                        onChange={(value) => props.onRegionCurrencyChange(value as NonNullable<SettingsData['regionCurrency']>)}
                     />
                 </div>
             </section>

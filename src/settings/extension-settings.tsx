@@ -11,6 +11,7 @@ import {
     DEALS,
     SETTINGS,
     type SettingsData,
+    type RegionCurrency,
     type GGUserSettingsData,
     type TabKey,
     saveSettings,
@@ -18,15 +19,13 @@ import {
     loadAppearanceSettings,
     loadGGUserSettings,
     hasGGUserSettingsData,
-    fetchGGUserSettings,
-    fetchGuestGGUserSettings,
     type SettingsAppearanceData,
     saveAppearanceSettings,
     saveGGUserSettings,
+    saveGGUserSettingsToLocalStorage,
     GGInvalidApiKeyError,
+    requestGGUserSettingsSync,
     signOutFromExtensionMemory,
-    SIGNED_OUT_EXTENSION_SETTINGS,
-    SIGNED_OUT_GG_USER_SETTINGS,
 } from './helpers';
 import {
     acknowledgeServerMessageBadges,
@@ -189,7 +188,7 @@ function mapUserRegionToRegionCurrency(region: string | undefined): SettingsData
     };
 
     if (!normalizedRegion) {
-        return 'eur-eu';
+        return null;
     }
 
     if (directRegionValueMap[normalizedRegion]) {
@@ -207,7 +206,7 @@ function mapUserRegionToRegionCurrency(region: string | undefined): SettingsData
         return countryToRegionCurrencyMap[lastRegionPart];
     }
 
-    return 'eur-eu';
+    return null;
 }
 function mapSettingsPlatformToUserPlatform(platform: SettingsData['platform']): string {
     if (platform === PLATFORM_STEAM) {
@@ -217,7 +216,7 @@ function mapSettingsPlatformToUserPlatform(platform: SettingsData['platform']): 
     return platform;
 }
 
-function mapSettingsRegionCurrencyToUserRegion(regionCurrency: SettingsData['regionCurrency']): string {
+function mapSettingsRegionCurrencyToUserRegion(regionCurrency: RegionCurrency): string | null {
     const normalizedRegionCurrency = regionCurrency.trim().toLowerCase();
     const [, regionCode] = normalizedRegionCurrency.split('-');
 
@@ -225,7 +224,7 @@ function mapSettingsRegionCurrencyToUserRegion(regionCurrency: SettingsData['reg
         return regionCode;
     }
 
-    return 'eu';
+    return null;
 }
 
 function ExtensionSettings() {
@@ -408,7 +407,7 @@ function ExtensionSettings() {
                     ? mapSettingsPlatformToUserPlatform(patch.platform as SettingsData['platform'])
                     : previous.platform,
                 region: hasRegionPatch
-                    ? mapSettingsRegionCurrencyToUserRegion(patch.regionCurrency as SettingsData['regionCurrency'])
+                    ? mapSettingsRegionCurrencyToUserRegion(patch.regionCurrency as RegionCurrency) ?? previous.region
                     : previous.region,
                 showKeyshops: hasKeyshopsPatch
                     ? (patch.keyshopsEnabled as boolean)
@@ -508,28 +507,26 @@ function ExtensionSettings() {
         }, false);
     }, [userSettings]);
 
-    const fetchGuestSettings = async (): Promise<void> => {
+    const synchronizeInitialUserSettings = async (): Promise<void> => {
         setIsSyncingUserSettings(true);
 
         try {
-            const guestSettings = await fetchGuestGGUserSettings();
-            saveGGUserSettings(guestSettings);
-            setUserSettings(guestSettings);
-            console.log('[gg.deals-extension] Saved GG guest settings in localStorage:', guestSettings);
+            const freshUserSettings = await requestGGUserSettingsSync({ mode: 'auto' });
+            saveGGUserSettingsToLocalStorage(freshUserSettings);
+            setUserSettings(freshUserSettings);
+            console.log('[gg.deals-extension] Synchronized initial GG user settings:', freshUserSettings);
         } catch (error) {
-            console.warn('[gg.deals-extension] Failed to fetch/save GG guest settings:', error);
+            console.warn('[gg.deals-extension] Failed to synchronize initial GG user settings:', error);
         } finally {
             setIsSyncingUserSettings(false);
         }
     };
 
     async function signOut(): Promise<void> {
-        // Remove the authenticated API key to make sure the user is a guest
-        signOutFromExtensionMemory();
+        // Remove login data, but keep the user's settings
+        const signedOutUserSettings = signOutFromExtensionMemory();
         void browser.storage.session.remove(SHOULD_FETCH_USER_SETTINGS_AFTER_SIGN_IN_KEY);
-        setSettings(SIGNED_OUT_EXTENSION_SETTINGS);
-        setUserSettings(SIGNED_OUT_GG_USER_SETTINGS);
-        await fetchGuestSettings();
+        setUserSettings(signedOutUserSettings);
     }
 
     const fetchSettings = async (preserveLocalOverrides = false, options?: {
@@ -542,9 +539,20 @@ function ExtensionSettings() {
         const openLoginPageOnMissingSession = options?.openLoginPageOnMissingSession ?? true;
 
         try {
-            const freshUserSettings = await fetchGGUserSettings(userSettings, {
+            const freshUserSettings = await requestGGUserSettingsSync({
+                mode: 'authenticated',
                 includeApiKeyHeader,
-                credentials: 'include',
+                requireAuthenticated: true,
+                ...(preserveLocalOverrides ? {
+                    overrides: {
+                        platform: mapSettingsPlatformToUserPlatform(settings.platform),
+                        ...(settings.regionCurrency ? {
+                            region: mapSettingsRegionCurrencyToUserRegion(settings.regionCurrency)
+                                ?? userSettings?.region,
+                        } : {}),
+                        showKeyshops: settings.keyshopsEnabled,
+                    },
+                } : {}),
             });
 
             if (!hasGGUserSettingsData(freshUserSettings)) {
@@ -554,18 +562,9 @@ function ExtensionSettings() {
                 return;
             }
 
-            const nextUserSettings: GGUserSettingsData = preserveLocalOverrides
-                ? {
-                    ...freshUserSettings,
-                    platform: mapSettingsPlatformToUserPlatform(settings.platform),
-                    region: mapSettingsRegionCurrencyToUserRegion(settings.regionCurrency),
-                    showKeyshops: settings.keyshopsEnabled,
-                }
-                : freshUserSettings;
-
-            saveGGUserSettings(nextUserSettings);
-            setUserSettings(nextUserSettings);
-            console.log('[gg.deals-extension] Saved GG user settings in localStorage:', nextUserSettings);
+            saveGGUserSettingsToLocalStorage(freshUserSettings);
+            setUserSettings(freshUserSettings);
+            console.log('[gg.deals-extension] Synchronized GG user settings:', freshUserSettings);
         }
         catch (error) {
             if (error instanceof GGInvalidApiKeyError) {
@@ -590,18 +589,7 @@ function ExtensionSettings() {
                 return;
             }
 
-            const hasCompleteStoredGuestSettings = Boolean(
-                userSettings
-                && !hasGGUserSettingsData(userSettings)
-                && userSettings.username === null
-                && userSettings.apiKey === null
-                && userSettings.platform.trim().length > 0
-                && userSettings.region.trim().length > 0
-            );
-
-            if (!hasGGUserSettingsData(userSettings) && !hasCompleteStoredGuestSettings) {
-                void fetchGuestSettings();
-            }
+            void synchronizeInitialUserSettings();
         });
     }, []);
 
@@ -751,7 +739,6 @@ function ExtensionSettings() {
                         <DealsTab
                             userSettings={userSettings}
                             platform={settings.platform}
-                            regionCurrency={settings.regionCurrency}
                             keyshopsEnabled={settings.keyshopsEnabled}
                             isSyncingUserSettings={isSyncingUserSettings}
                             onSignInClick={handleSignInFetch}

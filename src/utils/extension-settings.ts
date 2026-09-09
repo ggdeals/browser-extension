@@ -34,14 +34,15 @@ export type RegionCurrency =
 
 export type SettingsData = {
     platform: 'all' | 'pc' | 'steam' | 'xbox' | 'playstation' | 'nintendo';
-    regionCurrency: RegionCurrency;
+    // Set this from extensionData/user. Do not guess a region
+    regionCurrency: RegionCurrency | null;
     keyshopsEnabled: boolean;
     barEnabled: boolean;
 }
 
 export const DEFAULT_EXTENSION_SETTINGS: SettingsData = {
     platform: 'all',
-    regionCurrency: 'pln-pl',
+    regionCurrency: null,
     keyshopsEnabled: true,
     barEnabled: true,
 };
@@ -74,6 +75,17 @@ export type AuthenticatedGGUserSettingsData = GGUserSettingsData & {
     apiKey: string;
 };
 
+export type GGUserSettingsSyncMode = 'auto' | 'guest' | 'authenticated';
+
+export type GGUserSettingsSyncOptions = {
+    mode?: GGUserSettingsSyncMode;
+    includeApiKeyHeader?: boolean;
+    requireAuthenticated?: boolean;
+    overrides?: Partial<Pick<GGUserSettingsData, 'platform' | 'region' | 'showKeyshops'>>;
+};
+
+export const SYNC_GG_USER_SETTINGS_MESSAGE = 'SYNC_GG_USER_SETTINGS';
+
 export const SIGNED_OUT_GG_USER_SETTINGS: GGUserSettingsData = {
     username: null,
     apiKey: null,
@@ -85,7 +97,7 @@ export const SIGNED_OUT_GG_USER_SETTINGS: GGUserSettingsData = {
 
 export const SIGNED_OUT_EXTENSION_SETTINGS: SettingsData = {
     platform: 'all',
-    regionCurrency: 'eur-eu',
+    regionCurrency: null,
     keyshopsEnabled: true,
     barEnabled: true,
 };
@@ -637,13 +649,23 @@ export class GGInvalidApiKeyError extends Error {
     }
 }
 
-export function signOutFromExtensionMemory(): void {
-    saveGGUserSettings(SIGNED_OUT_GG_USER_SETTINGS);
-    saveSettings(SIGNED_OUT_EXTENSION_SETTINGS);
+export function signOutFromExtensionMemory(): GGUserSettingsData {
+    const previousUserSettings = loadGGUserSettings();
+    const signedOutUserSettings: GGUserSettingsData = {
+        ...SIGNED_OUT_GG_USER_SETTINGS,
+        // Remove login data, but keep the user's settings
+        platform: previousUserSettings?.platform ?? SIGNED_OUT_GG_USER_SETTINGS.platform,
+        region: previousUserSettings?.region ?? SIGNED_OUT_GG_USER_SETTINGS.region,
+        showKeyshops: previousUserSettings?.showKeyshops ?? SIGNED_OUT_GG_USER_SETTINGS.showKeyshops,
+    };
+
+    saveGGUserSettings(signedOutUserSettings);
     void browser.storage?.local?.remove([GG_CUSTOM_MESSAGES, GG_SERVER_MESSAGE_BADGE]).catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.warn('[gg.deals-extension] Failed to clear server messages:', errorMessage);
     });
+
+    return signedOutUserSettings;
 }
 
 export const loadSettings = (): SettingsData => {
@@ -763,11 +785,23 @@ export async function loadExcludedWebsitesFromChromeStorage(): Promise<string[] 
     }
 }
 
-export const saveGGUserSettings = (data: GGUserSettingsData): void => {
+export const saveGGUserSettingsToLocalStorage = (data: GGUserSettingsData): void => {
     localStorage.setItem(GG_USER_SETTINGS, JSON.stringify(data));
+};
+
+export async function saveGGUserSettingsToChromeStorage(data: GGUserSettingsData): Promise<void> {
+    if (!browser.storage?.local) {
+        throw new Error('Failed to save GG user settings: browser.storage.local is unavailable.');
+    }
+
+    await browser.storage.local.set({ [GG_USER_SETTINGS]: data });
+}
+
+export const saveGGUserSettings = (data: GGUserSettingsData): void => {
+    saveGGUserSettingsToLocalStorage(data);
 
     if (browser.storage?.local) {
-        void browser.storage.local.set({ [GG_USER_SETTINGS]: data }).catch((error: unknown) => {
+        void saveGGUserSettingsToChromeStorage(data).catch((error: unknown) => {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.warn('[gg.deals-extension] Failed to sync GG user settings to browser.storage.local:', errorMessage);
         });
@@ -882,6 +916,36 @@ export function fetchGuestGGUserSettings(): Promise<GGUserSettingsData> {
         includeApiKeyHeader: false,
         credentials: 'omit',
     });
+}
+
+type GGUserSettingsSyncResponse = {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+    errorCode?: 'INVALID_API_KEY';
+};
+
+export async function requestGGUserSettingsSync(
+    options: GGUserSettingsSyncOptions = {},
+): Promise<GGUserSettingsData> {
+    const response = await browser.runtime.sendMessage({
+        type: SYNC_GG_USER_SETTINGS_MESSAGE,
+        options,
+    }) as GGUserSettingsSyncResponse;
+
+    if (!response?.ok) {
+        if (response?.errorCode === 'INVALID_API_KEY') {
+            throw new GGInvalidApiKeyError();
+        }
+
+        throw new Error(response?.error ?? 'Failed to synchronize GG user settings.');
+    }
+
+    if (!isGGUserSettingsResponse(response.data)) {
+        throw new Error('Failed to synchronize GG user settings. Invalid response payload.');
+    }
+
+    return response.data;
 }
 
 export const getGGApiKey = (data?: GGUserSettingsData | null): string | null => {

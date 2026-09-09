@@ -98,9 +98,9 @@ import { resolveBottomBarPageContext, waitForRequiredDomainTitle } from '../inte
 import {
     loadGGUserSettingsFromChromeStorage,
     loadSettingsFromChromeStorage,
+    requestGGUserSettingsSync,
     isInvalidApiKeyResponse,
     DEFAULT_EXTENSION_SETTINGS,
-    SIGNED_OUT_EXTENSION_SETTINGS,
     SIGNED_OUT_GG_USER_SETTINGS,
     type GGGame,
     type GGGameLookupResponse,
@@ -233,9 +233,14 @@ async function clearExtensionSessionInStorage(): Promise<void> {
         return;
     }
 
+    const existingUserSettings = await loadGGUserSettingsFromChromeStorage();
     await browser.storage.local.set({
-        [GG_USER_SETTINGS]: SIGNED_OUT_GG_USER_SETTINGS,
-        [SETTINGS_STORAGE_KEY]: SIGNED_OUT_EXTENSION_SETTINGS,
+        [GG_USER_SETTINGS]: {
+            ...SIGNED_OUT_GG_USER_SETTINGS,
+            platform: existingUserSettings?.platform ?? SIGNED_OUT_GG_USER_SETTINGS.platform,
+            region: existingUserSettings?.region ?? SIGNED_OUT_GG_USER_SETTINGS.region,
+            showKeyshops: existingUserSettings?.showKeyshops ?? SIGNED_OUT_GG_USER_SETTINGS.showKeyshops,
+        },
     });
 }
 
@@ -906,17 +911,6 @@ function mapSettingsPlatformToRequestPlatform(platform: SettingsData['platform']
     return normalizedPlatform;
 }
 
-function mapSettingsRegionCurrencyToRequestRegion(regionCurrency: SettingsData['regionCurrency']): string {
-    const normalizedRegionCurrency = regionCurrency.trim().toLowerCase();
-    const [, regionCode] = normalizedRegionCurrency.split('-');
-
-    if (regionCode && regionCode.length > 0) {
-        return regionCode;
-    }
-
-    return 'eu';
-}
-
 export async function shouldInjectBottomBar(isStale: () => boolean = () => false): Promise<boolean> {
     // Early exit if bar is disabled in extension settings
     const barSettings = await loadSettingsFromChromeStorage();
@@ -1016,11 +1010,23 @@ export async function shouldInjectBottomBar(isStale: () => boolean = () => false
     pendingBarDebugData = null;
 
     try {
-        const [userSettings, extensionSettingsFromStorage] = await Promise.all([
+        const [storedUserSettings, extensionSettingsFromStorage] = await Promise.all([
             loadGGUserSettingsFromChromeStorage(),
             loadSettingsFromChromeStorage(),
         ]);
+        let userSettings = storedUserSettings;
         const extensionSettings = extensionSettingsFromStorage ?? DEFAULT_EXTENSION_SETTINGS;
+
+        if (!userSettings?.region?.trim()) {
+            try {
+                userSettings = await requestGGUserSettingsSync({ mode: 'auto' });
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                logBottomBarDebugReason('failed to synchronize region from extensionData/user', {
+                    error: errorMessage,
+                });
+            }
+        }
 
         const platform = userSettings?.platform?.trim().toLowerCase()
             || mapSettingsPlatformToRequestPlatform(extensionSettings.platform);
@@ -1028,8 +1034,12 @@ export async function shouldInjectBottomBar(isStale: () => boolean = () => false
         const showKeyshops = typeof userSettings?.showKeyshops === 'boolean'
             ? userSettings.showKeyshops
             : extensionSettings.keyshopsEnabled;
-        const region = userSettings?.region?.trim().toLowerCase()
-            || mapSettingsRegionCurrencyToRequestRegion(extensionSettings.regionCurrency);
+        const region = userSettings?.region?.trim().toLowerCase();
+
+        if (!region) {
+            logBottomBarDebugReason('region is not available from extensionData/user yet');
+            return false;
+        }
 
         const commonPayload = {
             platform,
