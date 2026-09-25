@@ -11,8 +11,8 @@ libraries in sync with your GG.deals account. Chrome and Firefox, Manifest V3.
   one of them recognises, and you can exclude any domain from the Appearance
   tab.
 - **Library sync.** Link an account on the GG.deals extension settings page and
-  import from Steam (library, wishlist, ignore list), Epic (library), or
-  PlayStation (collection, wishlist).
+  import from Steam (library, wishlist, ignore list), Epic (library),
+  PlayStation (collection, wishlist), or Nintendo (collection, wishlist).
 - **Popup.** The toolbar icon opens the current page's deals, your sync and
   account options, and the bar's appearance settings.
 

@@ -18,12 +18,20 @@ import PlayStationIntegration, {
     requestAuthRecovery as requestPlayStationAuthRecovery,
     syncWishlistByImportUrl as syncPlayStationWishlistByImportUrl
 } from './integrations/playstation';
+import NintendoIntegration, {
+    readConfiguredAccountIdFromElement as readConfiguredNintendoAccountId,
+    readConfiguredUsernameFromElement as readConfiguredNintendoUsername,
+    syncCollectionByImportUrl as syncNintendoCollectionByImportUrl
+} from './integrations/nintendo';
 import {
     EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID,
     EPIC_GAMES_WISHLIST_SYNC_BUTTON_ID,
     EPIC_SOURCE_ID,
     EXTENSION_INSTALLED_CLASSNAME,
     EXTENSION_VERSION,
+    NINTENDO_COLLECTION_SYNC_BUTTON_ID,
+    NINTENDO_SOURCE_ID,
+    NINTENDO_WISHLIST_SYNC_BUTTON_ID,
     PLAYSTATION_COLLECTION_SYNC_BUTTON_ID,
     PLAYSTATION_SOURCE_ID,
     PLAYSTATION_WISHLIST_SYNC_BUTTON_ID,
@@ -82,6 +90,10 @@ function detectProvider(statusElement: Element, connectUrl = ''): number | null 
         || normalizedConnectUrl.includes('/pscollection')
     ) {
         return PLAYSTATION_SOURCE_ID;
+    }
+
+    if (label.includes('nintendo') || normalizedConnectUrl.includes('/nintendo')) {
+        return NINTENDO_SOURCE_ID;
     }
 
     return null;
@@ -175,7 +187,7 @@ function bindSettingsProviderSyncActions(container: Element): void {
                     );
                     host.setAttribute('data-username', syncedAccount.username);
                     host.setAttribute('data-account-id', syncedAccount.accountId);
-                } else {
+                } else if (provider === PLAYSTATION_SOURCE_ID) {
                     const configuredPlayStationUsername = readConfiguredPlayStationUsername(host);
                     const configuredPlayStationAccountId = readConfiguredPlayStationAccountId(host);
                     const syncedAccount = await syncPlayStationWishlistByImportUrl(
@@ -184,6 +196,17 @@ function bindSettingsProviderSyncActions(container: Element): void {
                         undefined,
                         connectUrl,
                         configuredPlayStationAccountId
+                    );
+                    host.setAttribute('data-username', syncedAccount.username);
+                    host.setAttribute('data-account-id', syncedAccount.accountId);
+                } else if (provider === NINTENDO_SOURCE_ID) {
+                    const configuredNintendoUsername = readConfiguredNintendoUsername(host);
+                    const configuredNintendoAccountId = readConfiguredNintendoAccountId(host);
+                    const syncedAccount = await syncNintendoCollectionByImportUrl(
+                        connectUrl,
+                        configuredNintendoUsername,
+                        connectUrl,
+                        configuredNintendoAccountId
                     );
                     host.setAttribute('data-username', syncedAccount.username);
                     host.setAttribute('data-account-id', syncedAccount.accountId);
@@ -300,6 +323,7 @@ function initPageSpecificIntegrations(): void {
         SteamIntegration([STEAM_COLLECTION_SYNC_BUTTON_ID]);
         EpicIntegration([EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID]);
         PlayStationIntegration([PLAYSTATION_COLLECTION_SYNC_BUTTON_ID]);
+        NintendoIntegration([NINTENDO_COLLECTION_SYNC_BUTTON_ID]);
         return;
     }
 
@@ -307,6 +331,7 @@ function initPageSpecificIntegrations(): void {
         SteamIntegration(STEAM_WISHLIST_FALLBACK_BUTTON_IDS);
         EpicIntegration([EPIC_GAMES_WISHLIST_SYNC_BUTTON_ID]);
         PlayStationIntegration([PLAYSTATION_WISHLIST_SYNC_BUTTON_ID]);
+        NintendoIntegration([NINTENDO_WISHLIST_SYNC_BUTTON_ID]);
         return;
     }
 

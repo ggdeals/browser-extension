@@ -17,3 +17,10 @@ export const PLAYSTATION_SYNC_ERROR_MESSAGES = {
     emptyWishlist: 'Your PlayStation wishlist is empty. There’s nothing to sync.',
     generic: 'We encountered problems during PlayStation sync. Please try again later.'
 } as const;
+
+export const NINTENDO_SYNC_ERROR_MESSAGES = {
+    emptyCollection: 'Your Nintendo collection is empty. There’s nothing to sync.',
+    emptyWishlist: 'Your Nintendo wishlist is empty. There’s nothing to sync.',
+    manualRefreshRequired: 'Your Nintendo session has expired. Refresh the opened Nintendo page and sign in if needed, then try syncing again.',
+    generic: 'We encountered problems during Nintendo sync. Please try again later.'
+} as const;

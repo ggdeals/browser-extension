@@ -11,6 +11,26 @@ import {
   EPIC_TOKEN_URL,
   EPIC_WISHLIST_PERSISTED_QUERY_HASH,
   EPIC_SOURCE_ID,
+  NINTENDO_GRAPHQL_URL,
+  NINTENDO_GRAPHQL_LANGUAGE,
+  NINTENDO_GRAPHQL_NAS_LANGUAGE,
+  NINTENDO_COLLECTION_DISCOVERY_URL,
+  NINTENDO_COLLECTION_OPERATION,
+  NINTENDO_COLLECTION_PAGE_SIZE,
+  NINTENDO_NICKNAME_PAGE_TIMEOUT_MS,
+  NINTENDO_SESSION_INITIAL_REFRESH_TIMEOUT_MS,
+  NINTENDO_SESSION_REFRESH_POLL_INTERVAL_MS,
+  NINTENDO_SESSION_REFRESH_TIMEOUT_MS,
+  NINTENDO_SESSION_REFRESH_URL,
+  NINTENDO_SESSION_URL,
+  NINTENDO_SHOP_ID,
+  NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY,
+  NINTENDO_SAVANNA_CLIENT_ID_TIMEOUT_MS,
+  NINTENDO_SOURCE_ID,
+  NINTENDO_WISHLIST_OPERATION,
+  NINTENDO_WISHLIST_PAGE_SIZE,
+  NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY,
+  NINTENDO_WISHLIST_QUERY_HASH_TIMEOUT_MS,
   PLAYSTATION_COLLECTION_URL,
   PLAYSTATION_SOURCE_ID,
   PLAYSTATION_WISHLIST_URL,
@@ -94,6 +114,40 @@ type FetchPlaystationCollectionMessage = {
   url?: string;
 };
 
+type FetchNintendoAccountMessage = {
+  type: 'FETCH_NINTENDO_ACCOUNT';
+};
+
+type FetchNintendoWishlistMessage = {
+  type: 'FETCH_NINTENDO_WISHLIST';
+};
+
+type FetchNintendoCollectionMessage = {
+  type: 'FETCH_NINTENDO_COLLECTION';
+};
+
+type NintendoAccountNicknameReadyMessage = {
+  type: 'NINTENDO_ACCOUNT_NICKNAME_READY';
+  nickname?: string;
+};
+
+type NintendoWishlistQueryHashDiscoveredMessage = {
+  type: 'NINTENDO_WISHLIST_QUERY_HASH_DISCOVERED';
+  hash?: string;
+};
+
+type NintendoSavannaClientIdDiscoveredMessage = {
+  type: 'NINTENDO_SAVANNA_CLIENT_ID_DISCOVERED';
+  clientId?: string;
+};
+
+type NintendoCollectionBootstrapReadyMessage = {
+  type: 'NINTENDO_COLLECTION_BOOTSTRAP_READY';
+  clientId?: string;
+  idToken?: string;
+  nickname?: string;
+};
+
 type OpenUrlInNewTabMessage = {
   type: 'OPEN_URL_IN_NEW_TAB';
   url: string;
@@ -121,7 +175,7 @@ type SyncGGUserSettingsMessage = {
   options?: GGUserSettingsSyncOptions;
 };
 
-type BackgroundMessage = FetchSteamMessage | FetchSteamAccountNameMessage | PostImportDataMessage | FetchEpicTokenMessage | RefreshEpicTokenMessage | FetchEpicLibraryItemsMessage | FetchPlaystationWishlistMessage | FetchPlaystationAccountMessage | FetchPlaystationCollectionMessage | OpenUrlInNewTabMessage | FetchTestGameDataMessage | OpenPopupMessage | UpdateBadgeMessage | SyncGGUserSettingsMessage;
+type BackgroundMessage = FetchSteamMessage | FetchSteamAccountNameMessage | PostImportDataMessage | FetchEpicTokenMessage | RefreshEpicTokenMessage | FetchEpicLibraryItemsMessage | FetchPlaystationWishlistMessage | FetchPlaystationAccountMessage | FetchPlaystationCollectionMessage | FetchNintendoAccountMessage | FetchNintendoWishlistMessage | FetchNintendoCollectionMessage | NintendoAccountNicknameReadyMessage | NintendoWishlistQueryHashDiscoveredMessage | NintendoSavannaClientIdDiscoveredMessage | NintendoCollectionBootstrapReadyMessage | OpenUrlInNewTabMessage | FetchTestGameDataMessage | OpenPopupMessage | UpdateBadgeMessage | SyncGGUserSettingsMessage;
 
 type RuntimeMessageResponse = {
   ok: boolean;
@@ -130,6 +184,20 @@ type RuntimeMessageResponse = {
   errorCode?: 'INVALID_API_KEY';
   status?: number;
 };
+
+const pendingNintendoNicknameResolvers = new Map<number, (nickname: string) => void>();
+const pendingNintendoQueryHashResolvers = new Map<number, (hash: string) => void>();
+const pendingNintendoSavannaClientIdResolvers = new Map<number, (clientId: string) => void>();
+type NintendoCollectionBootstrap = {
+  savannaClientId: string;
+  idToken: string;
+  accountId: string;
+  country: string;
+  username: string;
+};
+type NintendoCollectionBootstrapPayload = Pick<NintendoCollectionBootstrap, 'savannaClientId' | 'idToken' | 'username'>;
+const pendingNintendoCollectionBootstrapResolvers = new Map<number, (bootstrap: NintendoCollectionBootstrapPayload) => void>();
+let pendingNintendoCollectionBootstrap: Promise<NintendoCollectionBootstrap> | null = null;
 
 type PaginationProgress = {
   sourceId: number;
@@ -978,6 +1046,158 @@ type PlaystationCollectionPageData = {
   page: number;
 };
 
+type NintendoSessionLocaleInfo = {
+  country: string;
+  language: string;
+};
+
+type NintendoSessionResponse = {
+  user?: Record<string, unknown>;
+  expires?: string;
+  idToken?: string;
+  naId?: string;
+  country?: string;
+  region?: string;
+  language?: string;
+  localeInfo?: NintendoSessionLocaleInfo;
+  isIdTokenExpired?: boolean;
+};
+
+type NintendoWishlistOffsetInfo = {
+  offset: number;
+  total: number;
+};
+
+type NintendoWishlistItemV2 = Record<string, unknown> & {
+  __typename: string;
+};
+
+type NintendoWishlistItem = Record<string, unknown> & {
+  nsUid: string;
+  itemV2: NintendoWishlistItemV2 | null;
+};
+
+type NintendoGraphQLError = {
+  message: string;
+  extensions?: {
+    type?: string;
+    status?: number;
+    module?: string;
+    title?: string;
+    errorCode?: string;
+    traceId?: string;
+  };
+};
+
+type NintendoWishlistGraphQLResponse = {
+  errors?: NintendoGraphQLError[];
+  data?: {
+    account?: {
+      wishlist?: {
+        wishlistItems?: {
+          items: NintendoWishlistItem[];
+          offsetInfo: NintendoWishlistOffsetInfo;
+        };
+      };
+    };
+  };
+};
+
+type NintendoCollectionOffsetInfo = {
+  offset: number;
+  total: number;
+};
+
+type NintendoCollectionView = Record<string, unknown> & {
+  id: string;
+};
+
+type NintendoCollectionGraphQLResponse = {
+  errors?: NintendoGraphQLError[];
+  data?: {
+    account?: {
+      vgc?: {
+        vgcViews?: {
+          views: NintendoCollectionView[];
+          offsetInfo: NintendoCollectionOffsetInfo;
+        };
+      };
+    };
+  };
+};
+
+const NINTENDO_COLLECTION_QUERY = `query getVgcsVgcs(
+  $idToken: String!
+  $isHidden: Boolean!
+  $country: CountryCode!
+  $language: LanguageCode!
+  $shopId: Int!
+  $limit: Int!
+  $nasLanguage: String!
+  $offset: Int!
+  $order: RequestableVgcViewOrder!
+  $sortBy: RequestableVgcViewSortBy!
+  $vgcViewType: VgcViewTypeInput
+  $vgcViewStatus: VgcViewStatusInput
+) @inContext(country: $country, language: $language, shopId: $shopId) {
+  account {
+    vgc {
+      vgcViews(
+        idToken: $idToken,
+        limit: $limit,
+        nasLanguage: $nasLanguage,
+        offset: $offset,
+        order: $order,
+        sortBy: $sortBy,
+        isHidden: $isHidden,
+        vgcViewType: $vgcViewType,
+        vgcViewStatus: $vgcViewStatus,
+      ) {
+        offsetInfo {
+          total
+          offset
+        }
+        views {
+          id
+          applicationId
+          applicationName
+          apparentPlatform
+          publisher
+          icon {
+            url
+            upgradedIconUrl
+            sizes
+          }
+          ownerNaId
+          userNaId
+          isHidden
+          isLending
+          isDisabledAllContents
+          isPartialLending
+          lendingExpireDatetime
+          insertedNsDeviceId
+          hasReleasedApplication
+          hasReleasedAddOnContents
+          hasReleasedUpgrade
+          hasReleasedNxApplication
+          hasReleasedNxAddOnContents
+          hasReleasedOunceApplication
+          hasReleasedOunceAddOnContents
+          containsReleased
+          containsUnreleased
+        }
+      }
+    }
+  }
+}`;
+
+class NintendoWishlistQueryHashError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NintendoWishlistQueryHashError';
+  }
+}
+
 function extractPlaystationCollectionPageData(nextDataPayload: unknown): PlaystationCollectionPageData {
   if (!nextDataPayload || typeof nextDataPayload !== 'object') {
     throw new Error('PlayStation collection: __NEXT_DATA__ payload is invalid');
@@ -1126,9 +1346,1076 @@ async function fetchPlaystationCollectionWithPagination(url: string, reportProgr
   };
 }
 
+function getNintendoTrimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getNintendoNonNegativeInteger(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  return Math.floor(value);
+}
+
+// Both the wishlist persisted query hash and the Savanna client ID are SHA-256 hex strings.
+function isNintendoSha256Hex(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
+}
+
+type NintendoWishlistFrontendConfig = {
+  queryHash: string;
+  savannaClientId: string;
+};
+
+async function readNintendoWishlistQueryHash(): Promise<string | null> {
+  const storedValues = await browser.storage.local.get(NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY);
+  const storedHash = storedValues[NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY];
+  if (isNintendoSha256Hex(storedHash)) {
+    return storedHash.toLowerCase();
+  }
+
+  if (typeof storedHash !== 'undefined') {
+    await browser.storage.local.remove(NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY);
+  }
+  return null;
+}
+
+async function saveNintendoWishlistQueryHash(hash: string): Promise<void> {
+  await browser.storage.local.set({
+    [NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY]: hash.toLowerCase()
+  });
+}
+
+async function readNintendoSavannaClientId(): Promise<string | null> {
+  const storedValues = await browser.storage.local.get(NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY);
+  const storedClientId = storedValues[NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY];
+  if (isNintendoSha256Hex(storedClientId)) {
+    return storedClientId.toLowerCase();
+  }
+
+  if (typeof storedClientId !== 'undefined') {
+    await browser.storage.local.remove(NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY);
+  }
+  return null;
+}
+
+async function saveNintendoSavannaClientId(clientId: string): Promise<void> {
+  await browser.storage.local.set({
+    [NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY]: clientId.toLowerCase()
+  });
+}
+
+function createNintendoTabValueWait<T>(
+  tabId: number,
+  resolvers: Map<number, (value: T) => void>,
+  timeoutMs: number,
+  unavailableError: string
+): { promise: Promise<T>; cancel: () => void } {
+  let cancel = (): void => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const rejectUnavailable = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolvers.delete(tabId);
+      reject(new Error(unavailableError));
+    };
+    const timeoutId = setTimeout(rejectUnavailable, timeoutMs);
+    cancel = () => {
+      clearTimeout(timeoutId);
+      rejectUnavailable();
+    };
+
+    resolvers.set(tabId, (value: T) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      resolvers.delete(tabId);
+      resolve(value);
+    });
+  });
+
+  // Keep a rejection handler attached if navigation fails before the promise is awaited.
+  void promise.catch(() => undefined);
+  return { promise, cancel };
+}
+
+async function discoverNintendoWishlistFrontendConfig(
+  knownQueryHash: string | null,
+  knownSavannaClientId: string | null
+): Promise<NintendoWishlistFrontendConfig> {
+  let tabId: number | undefined;
+  const cancelWaits: Array<() => void> = [];
+  try {
+    // Register the resolvers before navigating so fast discoveries cannot be missed.
+    const tab = await browser.tabs.create({ url: 'about:blank', active: false });
+    tabId = tab.id;
+    if (typeof tabId !== 'number') {
+      throw new Error(knownSavannaClientId
+        ? 'NINTENDO_QUERY_HASH_UNAVAILABLE'
+        : 'NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE');
+    }
+    const nintendoTabId = tabId;
+
+    const hashWait = knownQueryHash
+      ? null
+      : createNintendoTabValueWait(
+        nintendoTabId,
+        pendingNintendoQueryHashResolvers,
+        NINTENDO_WISHLIST_QUERY_HASH_TIMEOUT_MS,
+        'NINTENDO_QUERY_HASH_UNAVAILABLE'
+      );
+    const clientIdWait = knownSavannaClientId
+      ? null
+      : createNintendoTabValueWait(
+        nintendoTabId,
+        pendingNintendoSavannaClientIdResolvers,
+        NINTENDO_SAVANNA_CLIENT_ID_TIMEOUT_MS,
+        'NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE'
+      );
+    if (hashWait) {
+      cancelWaits.push(hashWait.cancel);
+    }
+    if (clientIdWait) {
+      cancelWaits.push(clientIdWait.cancel);
+    }
+
+    await browser.tabs.update(nintendoTabId, { url: NINTENDO_SESSION_REFRESH_URL });
+    const [queryHash, savannaClientId] = await Promise.all([
+      hashWait?.promise ?? Promise.resolve(knownQueryHash),
+      clientIdWait?.promise ?? Promise.resolve(knownSavannaClientId)
+    ]);
+    if (!queryHash) {
+      throw new Error('NINTENDO_QUERY_HASH_UNAVAILABLE');
+    }
+    if (!savannaClientId) {
+      throw new Error('NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE');
+    }
+    return { queryHash, savannaClientId };
+  } catch (error) {
+    if (
+      error instanceof Error
+      && (
+        error.message === 'NINTENDO_QUERY_HASH_UNAVAILABLE'
+        || error.message === 'NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE'
+      )
+    ) {
+      throw error;
+    }
+    throw new Error(knownSavannaClientId
+      ? 'NINTENDO_QUERY_HASH_UNAVAILABLE'
+      : 'NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE');
+  } finally {
+    cancelWaits.forEach((cancelWait) => cancelWait());
+    if (typeof tabId === 'number') {
+      pendingNintendoQueryHashResolvers.delete(tabId);
+      pendingNintendoSavannaClientIdResolvers.delete(tabId);
+      try {
+        await browser.tabs.remove(tabId);
+      } catch (error) {
+        console.warn('[gg.deals-extension][background] Failed to close Nintendo frontend config discovery tab:', error);
+      }
+    }
+  }
+}
+
+async function getNintendoWishlistFrontendConfig(): Promise<NintendoWishlistFrontendConfig & { usesStoredValues: boolean }> {
+  const [queryHash, savannaClientId] = await Promise.all([
+    readNintendoWishlistQueryHash(),
+    readNintendoSavannaClientId()
+  ]);
+  const usesStoredValues = Boolean(queryHash || savannaClientId);
+  if (queryHash && savannaClientId) {
+    return { queryHash, savannaClientId, usesStoredValues };
+  }
+
+  return {
+    ...await discoverNintendoWishlistFrontendConfig(queryHash, savannaClientId),
+    usesStoredValues
+  };
+}
+
+async function fetchNintendoNickname(): Promise<string> {
+  let tabId: number | undefined;
+  const cancelWaits: Array<() => void> = [];
+  try {
+    const [storedQueryHash, storedSavannaClientId] = await Promise.all([
+      readNintendoWishlistQueryHash(),
+      readNintendoSavannaClientId()
+    ]);
+
+    // Start blank so the listeners are registered before the content scripts can report their results.
+    const tab = await browser.tabs.create({ url: 'about:blank', active: false });
+    tabId = tab.id;
+    if (typeof tabId !== 'number') {
+      return '';
+    }
+
+    const nicknameWait = createNintendoTabValueWait(
+      tabId,
+      pendingNintendoNicknameResolvers,
+      NINTENDO_NICKNAME_PAGE_TIMEOUT_MS,
+      'NINTENDO_NICKNAME_UNAVAILABLE'
+    );
+    cancelWaits.push(nicknameWait.cancel);
+
+    // The same wishlist page exposes the wishlist frontend config. The message handlers store it,
+    // so waiting for it here lets the following wishlist fetch skip opening its own discovery tab.
+    const frontendConfigWaits = [
+      storedQueryHash
+        ? null
+        : createNintendoTabValueWait(
+          tabId,
+          pendingNintendoQueryHashResolvers,
+          NINTENDO_WISHLIST_QUERY_HASH_TIMEOUT_MS,
+          'NINTENDO_QUERY_HASH_UNAVAILABLE'
+        ),
+      storedSavannaClientId
+        ? null
+        : createNintendoTabValueWait(
+          tabId,
+          pendingNintendoSavannaClientIdResolvers,
+          NINTENDO_SAVANNA_CLIENT_ID_TIMEOUT_MS,
+          'NINTENDO_SAVANNA_CLIENT_ID_UNAVAILABLE'
+        )
+    ].filter((frontendConfigWait) => frontendConfigWait !== null);
+    frontendConfigWaits.forEach((frontendConfigWait) => cancelWaits.push(frontendConfigWait.cancel));
+
+    await browser.tabs.update(tabId, { url: NINTENDO_SESSION_REFRESH_URL });
+    const [nickname] = await Promise.all([
+      nicknameWait.promise.catch(() => ''),
+      ...frontendConfigWaits.map((frontendConfigWait) => frontendConfigWait.promise.catch(() => null))
+    ]);
+    console.log('[gg.deals-extension][background] Nintendo nickname found:', Boolean(nickname));
+    return nickname;
+  } catch (error) {
+    // A nickname is descriptive only; naId remains the account identity when this page is unavailable.
+    console.warn('[gg.deals-extension][background] Unable to read Nintendo nickname:', error);
+    return '';
+  } finally {
+    cancelWaits.forEach((cancelWait) => cancelWait());
+    if (typeof tabId === 'number') {
+      pendingNintendoNicknameResolvers.delete(tabId);
+      pendingNintendoQueryHashResolvers.delete(tabId);
+      pendingNintendoSavannaClientIdResolvers.delete(tabId);
+      try {
+        await browser.tabs.remove(tabId);
+      } catch (error) {
+        console.warn('[gg.deals-extension][background] Failed to close Nintendo nickname discovery tab:', error);
+      }
+    }
+  }
+}
+
+async function fetchNintendoSessionRaw(): Promise<NintendoSessionResponse> {
+  const response = await fetch(NINTENDO_SESSION_URL, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache'
+    }
+  });
+
+  console.log('[gg.deals-extension][background] FETCH_NINTENDO_SESSION status:', response.status);
+
+
+  if (!response.ok) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+
+  let session: NintendoSessionResponse | null = null;
+  try {
+    session = await response.json() as NintendoSessionResponse;
+    console.log('[gg.deals-extension][background] Nintendo session debug:', {
+      status: response.status,
+      keys: session ? Object.keys(session) : [],
+      hasIdToken: Boolean(getNintendoTrimmedString(session?.idToken)),
+      isIdTokenExpired: session?.isIdTokenExpired,
+      hasNaId: Boolean(getNintendoTrimmedString(session?.naId))
+    });
+  } catch {
+    console.warn('[gg.deals-extension][background] FETCH_NINTENDO_SESSION failed to parse session JSON');
+  }
+
+  if (!session) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+
+  return session;
+}
+
+function isNintendoSessionFresh(session: NintendoSessionResponse): boolean {
+  return getNintendoTrimmedString(session.idToken).length > 0
+    && session.isIdTokenExpired !== true;
+}
+
+async function pollFreshNintendoSession(timeoutMs: number): Promise<NintendoSessionResponse | null> {
+  const startedAtMs = Date.now();
+  while (Date.now() - startedAtMs < timeoutMs) {
+    await wait(NINTENDO_SESSION_REFRESH_POLL_INTERVAL_MS);
+    try {
+      const session = await fetchNintendoSessionRaw();
+      if (isNintendoSessionFresh(session)) {
+        return session;
+      }
+    } catch {
+      // The session endpoint may be temporarily unavailable while Nintendo refreshes the page session.
+    }
+  }
+  return null;
+}
+
+async function reloadNintendoTabAndWaitForComplete(tabId: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const onUpdated = (updatedTabId: number, changeInfo: { status?: string }): void => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        finish();
+      }
+    };
+    const timeoutId = setTimeout(() => {
+      finish(new Error('Nintendo wishlist tab reload timed out'));
+    }, NINTENDO_SESSION_REFRESH_TIMEOUT_MS);
+
+    browser.tabs.onUpdated.addListener(onUpdated);
+    void browser.tabs.reload(tabId).catch((error: unknown) => {
+      finish(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
+}
+
+async function refreshNintendoSession(): Promise<NintendoSessionResponse> {
+  console.log('[gg.deals-extension][background] Nintendo session refresh required');
+  let tabId: number | undefined;
+  let keepTabOpenForManualRefresh = false;
+  try {
+    const tab = await browser.tabs.create({
+      url: NINTENDO_SESSION_REFRESH_URL,
+      active: false
+    });
+    tabId = tab.id;
+    console.log('[gg.deals-extension][background] Nintendo wishlist refresh tab opened');
+    if (typeof tabId !== 'number') {
+      throw new Error('Nintendo wishlist refresh tab has no id');
+    }
+
+    const initialSession = await pollFreshNintendoSession(NINTENDO_SESSION_INITIAL_REFRESH_TIMEOUT_MS);
+    if (initialSession) {
+      return initialSession;
+    }
+
+    console.log('[gg.deals-extension][background] Nintendo session still expired, reloading wishlist tab');
+    await reloadNintendoTabAndWaitForComplete(tabId);
+    console.log('[gg.deals-extension][background] Nintendo wishlist tab reload completed');
+
+    const reloadedSession = await pollFreshNintendoSession(NINTENDO_SESSION_REFRESH_TIMEOUT_MS);
+    if (reloadedSession) {
+      console.log('[gg.deals-extension][background] Nintendo session refreshed after tab reload');
+      return reloadedSession;
+    }
+
+    console.warn('[gg.deals-extension][background] Nintendo session still expired after wishlist tab reload');
+    keepTabOpenForManualRefresh = true;
+    throw new Error('NINTENDO_WISHLIST_MANUAL_REFRESH_REQUIRED');
+  } catch (error) {
+    if (!(error instanceof Error && error.message === 'NINTENDO_WISHLIST_MANUAL_REFRESH_REQUIRED')) {
+      console.warn('[gg.deals-extension][background] Nintendo session refresh failed:', error);
+    }
+    throw error;
+  } finally {
+    if (typeof tabId === 'number' && !keepTabOpenForManualRefresh) {
+      try {
+        await browser.tabs.remove(tabId);
+      } catch (error) {
+        console.warn('[gg.deals-extension][background] Failed to close Nintendo silent refresh tab:', error);
+      }
+    }
+  }
+}
+
+async function getNintendoSession(): Promise<NintendoSessionResponse> {
+  let session: NintendoSessionResponse;
+  try {
+    session = await fetchNintendoSessionRaw();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'NINTENDO_AUTH_REQUIRED') {
+      return refreshNintendoSession();
+    }
+    throw error;
+  }
+
+  if (isNintendoSessionFresh(session)) {
+    return session;
+  }
+
+  return refreshNintendoSession();
+}
+
+function extractNintendoAccountId(session: NintendoSessionResponse): string {
+  return getNintendoTrimmedString(session.naId);
+}
+
+function extractNintendoSessionCountry(session: NintendoSessionResponse): string {
+  return getNintendoTrimmedString(session.localeInfo?.country)
+    || getNintendoTrimmedString(session.country);
+}
+
+function buildNintendoWishlistRequestUrl(
+  country: string,
+  idToken: string,
+  offset: number,
+  queryHash: string
+): string {
+  const requestUrl = new URL(NINTENDO_GRAPHQL_URL);
+  requestUrl.searchParams.set('operationName', NINTENDO_WISHLIST_OPERATION);
+  requestUrl.searchParams.set('variables', JSON.stringify({
+    country,
+    idToken,
+    language: NINTENDO_GRAPHQL_LANGUAGE,
+    limit: NINTENDO_WISHLIST_PAGE_SIZE,
+    offset,
+    shopId: NINTENDO_SHOP_ID
+  }));
+  requestUrl.searchParams.set('extensions', JSON.stringify({
+    persistedQuery: {
+      version: 1,
+      sha256Hash: queryHash
+    }
+  }));
+
+  return requestUrl.toString();
+}
+
+function isNintendoGraphqlAuthError(payload: { errors?: NintendoGraphQLError[] }): boolean {
+  if (!Array.isArray(payload?.errors)) {
+    return false;
+  }
+
+  return payload.errors.some((errorItem) => {
+    const message = typeof errorItem?.message === 'string' ? errorItem.message : '';
+    return /unauthor|forbidden|invalid\s+token|token\s+expired|expired\s+token/i.test(message);
+  });
+}
+
+function isNintendoGraphqlQueryHashError(payload: NintendoWishlistGraphQLResponse): boolean {
+  if (!Array.isArray(payload?.errors)) {
+    return false;
+  }
+
+  return payload.errors.some((errorItem) => {
+    const extensions = errorItem?.extensions;
+    const type = getNintendoTrimmedString(extensions?.type);
+    const title = getNintendoTrimmedString(extensions?.title);
+    const errorCode = getNintendoTrimmedString(extensions?.errorCode);
+    return errorCode === '1802'
+      && title === 'INVALID_PARAM'
+      && type.endsWith('/invalid-param');
+  });
+}
+
+function getNintendoGraphqlErrorMessage(payload: NintendoWishlistGraphQLResponse, httpStatus: number): string {
+  const firstError = Array.isArray(payload?.errors) ? payload.errors[0] : undefined;
+  const firstMessage = typeof firstError?.message === 'string' ? firstError.message.trim() : '';
+  return firstMessage.length > 0
+    ? firstMessage
+    : `Nintendo wishlist request failed (HTTP ${httpStatus})`;
+}
+
+async function fetchNintendoWishlistPage(
+  requestUrl: string,
+  savannaClientId: string
+): Promise<NintendoWishlistGraphQLResponse> {
+  const response = await fetch(requestUrl, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed',
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'application/json',
+      'Pragma': 'no-cache',
+      'X-Nintendo-Savanna-Client-Id': savannaClientId
+    }
+  });
+
+  console.log('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST page status:', response.status);
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+
+  let payload: NintendoWishlistGraphQLResponse | null = null;
+  try {
+    payload = await response.json() as NintendoWishlistGraphQLResponse;
+  } catch {
+    console.warn('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST failed to parse page JSON');
+  }
+
+  if (!payload) {
+    throw new Error(`Nintendo wishlist request returned invalid JSON (HTTP ${response.status})`);
+  }
+
+  if (isNintendoGraphqlAuthError(payload)) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+
+  if (isNintendoGraphqlQueryHashError(payload)) {
+    throw new NintendoWishlistQueryHashError('NINTENDO_QUERY_HASH_OUTDATED');
+  }
+
+  if (!response.ok) {
+    throw new Error(getNintendoGraphqlErrorMessage(payload, response.status));
+  }
+
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    throw new Error(getNintendoGraphqlErrorMessage(payload, response.status));
+  }
+
+  const wishlistItems = payload?.data?.account?.wishlist?.wishlistItems;
+  if (!wishlistItems || typeof wishlistItems !== 'object' || !Array.isArray(wishlistItems.items)) {
+    throw new Error('Nintendo wishlist: data.account.wishlist.wishlistItems is missing in response');
+  }
+
+  return payload;
+}
+
+function isNintendoWishlistItemAccepted(item: NintendoWishlistItem): boolean {
+  const typename = item.itemV2?.__typename;
+  return typename === 'ApplicationItem'
+    || typename === 'DlcItem'
+    || typename === 'BundleItem'
+    || item.itemV2 === null;
+}
+
+async function fetchNintendoWishlistWithPagination(
+  session: NintendoSessionResponse,
+  queryHash: string,
+  savannaClientId: string,
+  reportProgress?: PaginationProgressReporter
+): Promise<NintendoWishlistItem[]> {
+  const country = extractNintendoSessionCountry(session);
+  const idToken = getNintendoTrimmedString(session.idToken);
+
+  if (!country) {
+    throw new Error('Nintendo session is missing country info required for wishlist request');
+  }
+
+  const seenNsUids = new Set<string>();
+  const allItems: NintendoWishlistItem[] = [];
+  let offset = 0;
+  let page = 1;
+  let fetchedItemsCount = 0;
+  let expectedTotalPages: number | null = null;
+
+  // Safety guard against infinite loops when the backend keeps returning unexpected totals
+  const maxPages = 200;
+
+  while (true) {
+    if (page > maxPages) {
+      throw new Error(`Nintendo wishlist pagination exceeded the page limit (${maxPages} pages)`);
+    }
+
+    const requestUrl = buildNintendoWishlistRequestUrl(country, idToken, offset, queryHash);
+    const payload = await fetchNintendoWishlistPage(requestUrl, savannaClientId);
+
+    const wishlistItems = payload.data?.account?.wishlist?.wishlistItems;
+    const pageItems = wishlistItems?.items ?? [];
+
+    for (const item of pageItems) {
+      const nsUid = getNintendoTrimmedString(item.nsUid);
+      if (nsUid) {
+        if (seenNsUids.has(nsUid)) {
+          continue;
+        }
+        seenNsUids.add(nsUid);
+      }
+
+      if (!isNintendoWishlistItemAccepted(item)) {
+        continue;
+      }
+
+      allItems.push(item);
+    }
+
+    fetchedItemsCount += pageItems.length;
+
+    const offsetInfo = (wishlistItems?.offsetInfo && typeof wishlistItems.offsetInfo === 'object')
+      ? wishlistItems.offsetInfo as NintendoWishlistOffsetInfo
+      : null;
+    const totalValue = getNintendoNonNegativeInteger(offsetInfo?.total);
+    expectedTotalPages = totalValue !== null
+      ? Math.max(1, Math.ceil(totalValue / NINTENDO_WISHLIST_PAGE_SIZE))
+      : expectedTotalPages;
+
+    console.log('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST page stats:', {
+      page,
+      pageItems: pageItems.length,
+      acceptedItems: allItems.length,
+      fetchedItemsCount,
+      total: totalValue ?? '<unknown>'
+    });
+
+    reportProgress?.({
+      sourceId: NINTENDO_SOURCE_ID,
+      currentPage: page,
+      totalPages: expectedTotalPages
+    });
+
+    if (pageItems.length === 0) {
+      break;
+    }
+
+    if (totalValue !== null && fetchedItemsCount >= totalValue) {
+      break;
+    }
+
+    // Fallback when offsetInfo.total is missing or invalid
+    if (totalValue === null && pageItems.length < NINTENDO_WISHLIST_PAGE_SIZE) {
+      break;
+    }
+
+    offset += NINTENDO_WISHLIST_PAGE_SIZE;
+    page += 1;
+  }
+
+  return allItems;
+}
+
+async function fetchNintendoWishlistWithCurrentFrontendConfig(
+  session: NintendoSessionResponse,
+  reportProgress?: PaginationProgressReporter
+): Promise<NintendoWishlistItem[]> {
+  const { queryHash, savannaClientId, usesStoredValues } = await getNintendoWishlistFrontendConfig();
+  try {
+    return await fetchNintendoWishlistWithPagination(
+      session,
+      queryHash,
+      savannaClientId,
+      reportProgress
+    );
+  } catch (error) {
+    // Stored values may be outdated in ways Nintendo does not report as a query hash error
+    // (e.g. a rotated client ID), so give them one retry with freshly discovered values.
+    const isQueryHashError = error instanceof NintendoWishlistQueryHashError;
+    if (!isQueryHashError && !usesStoredValues) {
+      throw error;
+    }
+
+    console.warn('[gg.deals-extension][background] Nintendo wishlist request failed, rediscovering frontend config:', error);
+
+    await browser.storage.local.remove([
+      NINTENDO_WISHLIST_QUERY_HASH_STORAGE_KEY,
+      NINTENDO_SAVANNA_CLIENT_ID_STORAGE_KEY
+    ]);
+    let refreshedConfig: NintendoWishlistFrontendConfig;
+    try {
+      refreshedConfig = await discoverNintendoWishlistFrontendConfig(null, null);
+    } catch (discoveryError) {
+      // Keep the original error (e.g. NINTENDO_AUTH_REQUIRED) when the retry was only speculative.
+      throw isQueryHashError ? discoveryError : error;
+    }
+    return fetchNintendoWishlistWithPagination(
+      session,
+      refreshedConfig.queryHash,
+      refreshedConfig.savannaClientId,
+      reportProgress
+    );
+  }
+}
+
+function getNintendoCollectionGraphqlErrorMessage(payload: NintendoCollectionGraphQLResponse, httpStatus: number): string {
+  const firstError = Array.isArray(payload?.errors) ? payload.errors[0] : undefined;
+  const firstMessage = typeof firstError?.message === 'string' ? firstError.message.trim() : '';
+  return firstMessage.length > 0
+    ? firstMessage
+    : `Nintendo collection request failed (HTTP ${httpStatus})`;
+}
+
+function decodeNintendoCollectionIdTokenPayload(idToken: string): Record<string, unknown> {
+  const payloadSegment = idToken.split('.')[1];
+  if (!payloadSegment) {
+    throw new Error('Nintendo collection bootstrap returned an invalid idToken');
+  }
+
+  try {
+    const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const payload = JSON.parse(atob(padded)) as unknown;
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Invalid payload');
+    }
+    return payload as Record<string, unknown>;
+  } catch (error) {
+    console.error('[gg.deals-extension][background] Nintendo collection idToken payload decode error:', error);
+    throw error;
+  }
+}
+
+function extractNintendoCollectionAccountId(idToken: string): string {
+  const accountId = getNintendoTrimmedString(decodeNintendoCollectionIdTokenPayload(idToken).sub);
+  if (!accountId) {
+    throw new Error('Nintendo collection idToken is missing the sub claim');
+  }
+  return accountId;
+}
+
+function extractNintendoCollectionCountry(idToken: string): string {
+  const country = getNintendoTrimmedString(decodeNintendoCollectionIdTokenPayload(idToken).country).toUpperCase();
+  if (!country) {
+    throw new Error('Nintendo collection idToken is missing the country claim');
+  }
+  return country;
+}
+
+async function fetchNintendoCollectionPage(
+  bootstrap: NintendoCollectionBootstrap,
+  offset: number,
+  isHidden: boolean
+): Promise<NintendoCollectionGraphQLResponse> {
+  const response = await fetch(NINTENDO_GRAPHQL_URL, {
+    method: 'POST',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed',
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'application/json',
+      'Pragma': 'no-cache',
+      'X-Nintendo-Savanna-Client-Id': bootstrap.savannaClientId
+    },
+    body: JSON.stringify({
+      operationName: NINTENDO_COLLECTION_OPERATION,
+      query: NINTENDO_COLLECTION_QUERY,
+      variables: {
+        idToken: bootstrap.idToken,
+        isHidden,
+        country: bootstrap.country,
+        language: NINTENDO_GRAPHQL_LANGUAGE,
+        shopId: NINTENDO_SHOP_ID,
+        limit: NINTENDO_COLLECTION_PAGE_SIZE,
+        nasLanguage: NINTENDO_GRAPHQL_NAS_LANGUAGE,
+        offset,
+        order: 'DESC',
+        sortBy: 'ACTIVATED_DATE',
+        vgcViewType: null,
+        vgcViewStatus: null
+      }
+    })
+  });
+
+  console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION page status:', {
+    status: response.status,
+    offset
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+
+  let payload: NintendoCollectionGraphQLResponse | null = null;
+  try {
+    payload = await response.json() as NintendoCollectionGraphQLResponse;
+  } catch (error) {
+    console.error('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION failed to parse page JSON:', error);
+    throw error;
+  }
+  if (!payload) {
+    throw new Error(`Nintendo collection request returned invalid JSON (HTTP ${response.status})`);
+  }
+  if (isNintendoGraphqlAuthError(payload)) {
+    throw new Error('NINTENDO_AUTH_REQUIRED');
+  }
+  if (!response.ok || (Array.isArray(payload.errors) && payload.errors.length > 0)) {
+    throw new Error(getNintendoCollectionGraphqlErrorMessage(payload, response.status));
+  }
+
+  const vgcViews = payload.data?.account?.vgc?.vgcViews;
+  if (!vgcViews || typeof vgcViews !== 'object' || !Array.isArray(vgcViews.views)) {
+    throw new Error('Nintendo collection: data.account.vgc.vgcViews is missing in response');
+  }
+  return payload;
+}
+
+async function fetchNintendoCollectionWithPagination(
+  bootstrap: NintendoCollectionBootstrap,
+  isHidden: boolean,
+  reportProgress?: PaginationProgressReporter
+): Promise<NintendoCollectionView[]> {
+  const allViews: NintendoCollectionView[] = [];
+  let offset = 0;
+  let page = 1;
+  let fetchedViewsCount = 0;
+  let expectedTotalPages: number | null = null;
+  const maxPages = 200;
+
+  while (true) {
+    if (page > maxPages) {
+      throw new Error(`Nintendo collection pagination exceeded the page limit (${maxPages} pages)`);
+    }
+
+    const payload = await fetchNintendoCollectionPage(bootstrap, offset, isHidden);
+    const vgcViews = payload.data?.account?.vgc?.vgcViews;
+    const pageViews = vgcViews?.views ?? [];
+    for (const view of pageViews) {
+      const id = getNintendoTrimmedString(view.id);
+      if (!id) {
+        throw new Error('Nintendo collection: a VGC view is missing id');
+      }
+      allViews.push(view);
+    }
+
+    fetchedViewsCount += pageViews.length;
+    const offsetInfo = vgcViews?.offsetInfo && typeof vgcViews.offsetInfo === 'object'
+      ? vgcViews.offsetInfo as NintendoCollectionOffsetInfo
+      : null;
+    const totalValue = getNintendoNonNegativeInteger(offsetInfo?.total);
+    expectedTotalPages = totalValue !== null
+      ? Math.max(1, Math.ceil(totalValue / NINTENDO_COLLECTION_PAGE_SIZE))
+      : expectedTotalPages;
+
+    console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION page stats:', {
+      page,
+      offset,
+      isHidden,
+      pageViews: pageViews.length,
+      fetchedViewsCount,
+      total: totalValue ?? '<unknown>'
+    });
+    reportProgress?.({ sourceId: NINTENDO_SOURCE_ID, currentPage: page, totalPages: expectedTotalPages });
+
+    if (pageViews.length === 0 || (totalValue !== null && fetchedViewsCount >= totalValue)) {
+      break;
+    }
+    if (totalValue === null && pageViews.length < NINTENDO_COLLECTION_PAGE_SIZE) {
+      break;
+    }
+    offset += NINTENDO_COLLECTION_PAGE_SIZE;
+    page += 1;
+  }
+
+  return allViews;
+}
+
+// Views can repeat across pages and between the visible and hidden lists.
+function dedupeNintendoCollectionViews(views: NintendoCollectionView[]): NintendoCollectionView[] {
+  const seenIds = new Set<string>();
+  return views.filter((view) => {
+    const id = getNintendoTrimmedString(view.id);
+    if (!id || seenIds.has(id)) {
+      return false;
+    }
+    seenIds.add(id);
+    return true;
+  });
+}
+
+function excludeNintendoDlcOnlyViews(views: NintendoCollectionView[]): NintendoCollectionView[] {
+  return views.filter((view) => !(
+    view.hasReleasedApplication === false
+    && view.hasReleasedAddOnContents === true
+  ));
+}
+
+// A logged-out user is redirected away from the VGC portal page to the Nintendo Account login page.
+async function isNintendoCollectionTabRedirectedAway(tabId: number | undefined): Promise<boolean> {
+  if (typeof tabId !== 'number') {
+    return false;
+  }
+
+  try {
+    const tab = await browser.tabs.get(tabId);
+    const tabUrl = new URL(tab.url ?? '');
+    const discoveryUrl = new URL(NINTENDO_COLLECTION_DISCOVERY_URL);
+    return tabUrl.protocol === 'https:'
+      && (tabUrl.hostname !== discoveryUrl.hostname || tabUrl.pathname !== discoveryUrl.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function getNintendoCollectionBootstrap(): Promise<NintendoCollectionBootstrap> {
+  if (pendingNintendoCollectionBootstrap) {
+    return pendingNintendoCollectionBootstrap;
+  }
+
+  const bootstrapPromise = (async (): Promise<NintendoCollectionBootstrap> => {
+    let tabId: number | undefined;
+    let nicknameWait: { promise: Promise<string>; cancel: () => void } | null = null;
+    let bootstrapSettled = false;
+    let resolveBootstrap!: (bootstrap: NintendoCollectionBootstrapPayload) => void;
+    let rejectBootstrap!: (error: Error) => void;
+    const bootstrapResultPromise = new Promise<NintendoCollectionBootstrapPayload>((resolve, reject) => {
+      resolveBootstrap = resolve;
+      rejectBootstrap = reject;
+    });
+    void bootstrapResultPromise.catch(() => undefined);
+    const bootstrapTimeoutId = setTimeout(() => {
+      if (bootstrapSettled) {
+        return;
+      }
+      bootstrapSettled = true;
+      if (typeof tabId === 'number') {
+        pendingNintendoCollectionBootstrapResolvers.delete(tabId);
+      }
+      void isNintendoCollectionTabRedirectedAway(tabId).then((isRedirectedAway) => {
+        rejectBootstrap(new Error(isRedirectedAway
+          ? 'NINTENDO_AUTH_REQUIRED'
+          : 'NINTENDO_COLLECTION_BOOTSTRAP_TIMEOUT'));
+      });
+    }, NINTENDO_SAVANNA_CLIENT_ID_TIMEOUT_MS);
+
+    try {
+      console.log('[gg.deals-extension][background] Nintendo collection bootstrap required');
+      const tab = await browser.tabs.create({ url: 'about:blank', active: false });
+      tabId = tab.id;
+      if (typeof tabId !== 'number') {
+        throw new Error('NINTENDO_COLLECTION_BOOTSTRAP_UNAVAILABLE');
+      }
+      console.log('[gg.deals-extension][background] Nintendo collection bootstrap tab created:', tabId);
+
+      pendingNintendoCollectionBootstrapResolvers.set(tabId, (bootstrap) => {
+        if (bootstrapSettled) {
+          return;
+        }
+        bootstrapSettled = true;
+        clearTimeout(bootstrapTimeoutId);
+        pendingNintendoCollectionBootstrapResolvers.delete(tabId as number);
+        resolveBootstrap(bootstrap);
+      });
+      nicknameWait = createNintendoTabValueWait(
+        tabId,
+        pendingNintendoNicknameResolvers,
+        NINTENDO_NICKNAME_PAGE_TIMEOUT_MS,
+        'NINTENDO_COLLECTION_NICKNAME_UNAVAILABLE'
+      );
+      await browser.tabs.update(tabId, { url: NINTENDO_COLLECTION_DISCOVERY_URL });
+      const bootstrap = await bootstrapResultPromise;
+      // The bootstrap message usually carries the nickname already. Otherwise give the nickname
+      // content script a short grace period; the nickname is optional, so its timeout must not fail the bootstrap.
+      const username = bootstrap.username || await Promise.race([
+        nicknameWait.promise.catch(() => ''),
+        new Promise<string>((resolve) => setTimeout(() => resolve(''), 250))
+      ]);
+      return {
+        ...bootstrap,
+        accountId: extractNintendoCollectionAccountId(bootstrap.idToken),
+        country: extractNintendoCollectionCountry(bootstrap.idToken),
+        username
+      };
+    } catch (error) {
+      console.error('[gg.deals-extension][background] Nintendo collection bootstrap error:', error);
+      throw error;
+    } finally {
+      clearTimeout(bootstrapTimeoutId);
+      nicknameWait?.cancel();
+      if (typeof tabId === 'number') {
+        pendingNintendoCollectionBootstrapResolvers.delete(tabId);
+        pendingNintendoNicknameResolvers.delete(tabId);
+        try {
+          await browser.tabs.remove(tabId);
+        } catch (error) {
+          console.warn('[gg.deals-extension][background] Failed to close Nintendo collection bootstrap tab:', error);
+        }
+      }
+    }
+  })();
+
+  pendingNintendoCollectionBootstrap = bootstrapPromise;
+  try {
+    return await bootstrapPromise;
+  } finally {
+    if (pendingNintendoCollectionBootstrap === bootstrapPromise) {
+      pendingNintendoCollectionBootstrap = null;
+    }
+  }
+}
+
 browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { tab?: { id?: number } }): Promise<RuntimeMessageResponse | void> => {
   const message = rawMessage as BackgroundMessage;
   console.log('[gg.deals-extension][background] message received:', message?.type);
+
+  if (message?.type === 'NINTENDO_ACCOUNT_NICKNAME_READY') {
+    const tabId = sender.tab?.id;
+    if (typeof tabId === 'number') {
+      const nickname = typeof message.nickname === 'string'
+        ? getNintendoTrimmedString(message.nickname)
+        : '';
+      pendingNintendoNicknameResolvers.get(tabId)?.(nickname);
+    }
+    return { ok: true };
+  }
+
+  if (message?.type === 'NINTENDO_WISHLIST_QUERY_HASH_DISCOVERED') {
+    if (!isNintendoSha256Hex(message.hash)) {
+      return { ok: false, error: 'Invalid Nintendo wishlist query hash' };
+    }
+
+    const normalizedHash = message.hash.toLowerCase();
+    await saveNintendoWishlistQueryHash(normalizedHash);
+    const tabId = sender.tab?.id;
+    if (typeof tabId === 'number') {
+      pendingNintendoQueryHashResolvers.get(tabId)?.(normalizedHash);
+    }
+    return { ok: true };
+  }
+
+  if (message?.type === 'NINTENDO_SAVANNA_CLIENT_ID_DISCOVERED') {
+    if (!isNintendoSha256Hex(message.clientId)) {
+      return { ok: false, error: 'Invalid Nintendo Savanna Client ID' };
+    }
+
+    const normalizedClientId = message.clientId.toLowerCase();
+    await saveNintendoSavannaClientId(normalizedClientId);
+    const tabId = sender.tab?.id;
+    if (typeof tabId === 'number') {
+      pendingNintendoSavannaClientIdResolvers.get(tabId)?.(normalizedClientId);
+    }
+    return { ok: true };
+  }
+
+  if (message?.type === 'NINTENDO_COLLECTION_BOOTSTRAP_READY') {
+    const idToken = getNintendoTrimmedString(message.idToken);
+    const savannaClientId = getNintendoTrimmedString(message.clientId).toLowerCase();
+    const username = getNintendoTrimmedString(message.nickname);
+    console.log('[gg.deals-extension][background] Nintendo collection bootstrap message received', {
+      hasIdToken: Boolean(idToken),
+      hasSavannaClientId: Boolean(savannaClientId),
+      hasNickname: Boolean(username)
+    });
+    if (!idToken || !isNintendoSha256Hex(savannaClientId)) {
+      return { ok: false, error: 'Invalid Nintendo collection bootstrap' };
+    }
+
+    const tabId = sender.tab?.id;
+    if (typeof tabId === 'number') {
+      const resolvePendingBootstrap = pendingNintendoCollectionBootstrapResolvers.get(tabId);
+      if (resolvePendingBootstrap) {
+        resolvePendingBootstrap({ savannaClientId, idToken, username });
+        console.log('[gg.deals-extension][background] Nintendo collection bootstrap resolved');
+      }
+    }
+    return { ok: true };
+  }
 
   if (message?.type === SYNC_GG_USER_SETTINGS_MESSAGE) {
     try {
@@ -1424,6 +2711,77 @@ browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { tab?
       return { ok: true, data: collectionData };
     } catch (error) {
       console.error('[gg.deals-extension][background] FETCH_PLAYSTATION_COLLECTION error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: errorMessage };
+    }
+  }
+
+  if (message?.type === 'FETCH_NINTENDO_ACCOUNT') {
+    try {
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_ACCOUNT start');
+      const session = await getNintendoSession();
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_ACCOUNT session:', {
+        hasIdToken: Boolean(getNintendoTrimmedString(session.idToken)),
+        isIdTokenExpired: session.isIdTokenExpired === true
+      });
+      const accountId = extractNintendoAccountId(session);
+      if (!accountId) {
+        throw new Error('Nintendo session is missing naId');
+      }
+      const username = await fetchNintendoNickname();
+
+      // naId is the identity; the account page provides an optional display nickname.
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_ACCOUNT accountId:', accountId || '<missing>');
+      return { ok: true, data: { accountId, username } };
+    } catch (error) {
+      console.error('[gg.deals-extension][background] FETCH_NINTENDO_ACCOUNT error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: errorMessage };
+    }
+  }
+
+  if (message?.type === 'FETCH_NINTENDO_WISHLIST') {
+    try {
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST start');
+      const session = await getNintendoSession();
+      const items = await fetchNintendoWishlistWithCurrentFrontendConfig(session, (progress) => {
+        sendPaginationProgressToTab(sender.tab?.id, progress);
+      });
+      const accountId = extractNintendoAccountId(session);
+      if (!accountId) {
+        throw new Error('Nintendo session is missing naId');
+      }
+
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST accountId:', accountId || '<missing>');
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST total items:', items.length);
+      return { ok: true, data: { accountId, username: '', items } };
+    } catch (error) {
+      console.error('[gg.deals-extension][background] FETCH_NINTENDO_WISHLIST error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: errorMessage };
+    }
+  }
+
+  if (message?.type === 'FETCH_NINTENDO_COLLECTION') {
+    try {
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION start');
+      const bootstrap = await getNintendoCollectionBootstrap();
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION bootstrap ready, fetching views');
+      const visibleItems = await fetchNintendoCollectionWithPagination(
+        bootstrap,
+        false,
+        (progress) => sendPaginationProgressToTab(sender.tab?.id, progress)
+      );
+      const hiddenItems = await fetchNintendoCollectionWithPagination(bootstrap, true);
+      const deduplicatedItems = dedupeNintendoCollectionViews([...visibleItems, ...hiddenItems]);
+      const items = excludeNintendoDlcOnlyViews(deduplicatedItems);
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION DLC-only views excluded:', deduplicatedItems.length - items.length);
+
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION accountId:', bootstrap.accountId || '<missing>');
+      console.log('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION total views:', items.length);
+      return { ok: true, data: { accountId: bootstrap.accountId, username: bootstrap.username, items } };
+    } catch (error) {
+      console.error('[gg.deals-extension][background] FETCH_NINTENDO_COLLECTION error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { ok: false, error: errorMessage };
     }

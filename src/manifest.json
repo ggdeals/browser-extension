@@ -68,6 +68,17 @@
     },
     {
       "matches": [
+        "https://ec.nintendo.com/*",
+        "https://accounts.nintendo.com/*"
+      ],
+      "js": [
+        "src/integrations/nintendo/nintendo-account-nickname.ts",
+        "src/integrations/nintendo/nintendo-wishlist-query-hash.ts"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://store.steampowered.com/*",
         "https://*.wingamestore.com/*",
         "https://*.gamebillet.com/*",
