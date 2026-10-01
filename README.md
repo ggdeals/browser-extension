@@ -1,6 +1,6 @@
 # GG.deals Extension
 
-Browser extension that shows GG.deals prices while you shop and keeps your game
+Browser extension that shows [GG.deals](https://gg.deals/) prices while you shop and keeps your game
 libraries in sync with your GG.deals account. Chrome and Firefox, Manifest V3.
 
 ## What It Does
