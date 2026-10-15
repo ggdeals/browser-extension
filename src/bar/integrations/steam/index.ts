@@ -1,8 +1,9 @@
 import type { DomainPageRule } from '../types';
 
 export const resolveSteamTitle = (): string | null => {
-    const appName = document.querySelector('#appHubAppName') as HTMLElement | null;
-    const title = appName?.textContent?.trim();
+    const heading = document.querySelector<HTMLElement>('#appHubAppName')
+        ?? document.querySelector<HTMLElement>('h2.pageheader');
+    const title = heading?.textContent?.trim();
     return title && title.length > 0 ? title : null;
 };
 
