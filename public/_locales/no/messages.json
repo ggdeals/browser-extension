@@ -111,6 +111,12 @@
   "settingsKeyshopsDescription": {
     "message": "Kontroller visningen av priser fra keyshops."
   },
+  "settingsSubscriptionsTitle": {
+    "message": "Abonnementer"
+  },
+  "settingsSubscriptionsDescription": {
+    "message": "Vis abonnementsinformasjon i GG.deals-linjen."
+  },
   "settingsBarTitle": {
     "message": "GG.deals-linje"
   },
@@ -295,6 +301,18 @@
   },
   "barKeyshopLabel": {
     "message": "Keyshop:"
+  },
+  "barSubsLabel": {
+    "message": "Subs:"
+  },
+  "barSubsHeader": {
+    "message": "Abonnementer:"
+  },
+  "barDisableSubscriptions": {
+    "message": "Deaktiver abonnementer"
+  },
+  "barEnableSubscriptions": {
+    "message": "Aktiver abonnementer"
   },
   "barViewOnGgDeals": {
     "message": "Vis på GG.deals"

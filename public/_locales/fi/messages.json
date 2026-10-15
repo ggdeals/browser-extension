@@ -111,6 +111,12 @@
   "settingsKeyshopsDescription": {
     "message": "Hallitse avainkauppojen hintojen näyttämistä."
   },
+  "settingsSubscriptionsTitle": {
+    "message": "Tilaukset"
+  },
+  "settingsSubscriptionsDescription": {
+    "message": "Näytä tilaustiedot GG.deals-palkissa."
+  },
   "settingsBarTitle": {
     "message": "GG.deals-palkki"
   },
@@ -295,6 +301,18 @@
   },
   "barKeyshopLabel": {
     "message": "Avainkauppa:"
+  },
+  "barSubsLabel": {
+    "message": "Subs:"
+  },
+  "barSubsHeader": {
+    "message": "Tilaukset:"
+  },
+  "barDisableSubscriptions": {
+    "message": "Poista tilaukset käytöstä"
+  },
+  "barEnableSubscriptions": {
+    "message": "Ota tilaukset käyttöön"
   },
   "barViewOnGgDeals": {
     "message": "Näytä GG.deals-palvelussa"

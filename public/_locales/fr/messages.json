@@ -111,6 +111,12 @@
   "settingsKeyshopsDescription": {
     "message": "Contrôlez l’affichage des prix des keyshops."
   },
+  "settingsSubscriptionsTitle": {
+    "message": "Abonnements"
+  },
+  "settingsSubscriptionsDescription": {
+    "message": "Afficher les informations sur les abonnements dans la barre GG.deals."
+  },
   "settingsBarTitle": {
     "message": "Barre GG.deals"
   },
@@ -295,6 +301,18 @@
   },
   "barKeyshopLabel": {
     "message": "Keyshop :"
+  },
+  "barSubsLabel": {
+    "message": "Subs :"
+  },
+  "barSubsHeader": {
+    "message": "Abonnements :"
+  },
+  "barDisableSubscriptions": {
+    "message": "Désactiver les abonnements"
+  },
+  "barEnableSubscriptions": {
+    "message": "Activer les abonnements"
   },
   "barViewOnGgDeals": {
     "message": "Voir sur GG.deals"

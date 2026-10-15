@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import {
     APPEARANCE_STORAGE_KEY,
+    BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY,
     EMAIL_UNVERIFIED_ERROR_CODE,
     EXCLUDED_WEBSITES_STORAGE_KEY,
     GG_CUSTOM_MESSAGES,
@@ -49,8 +50,23 @@ export const DEFAULT_APPEARANCE_SETTINGS: SettingsAppearanceData = {
     systemTheme: 'system',
     theme: 'system',
     barWidth: 'fit-content',
-    rounding: 'rounded',
+    rounding: 'rounded-top',
 };
+
+export function normalizeAppearanceSettings(value: unknown): SettingsAppearanceData {
+    const settings = value && typeof value === 'object' ? value as Partial<SettingsAppearanceData> : {};
+    const isTheme = (theme: unknown): theme is SettingsAppearanceData['theme'] =>
+        theme === 'dark' || theme === 'light' || theme === 'system';
+
+    return {
+        systemTheme: isTheme(settings.systemTheme) ? settings.systemTheme : DEFAULT_APPEARANCE_SETTINGS.systemTheme,
+        theme: isTheme(settings.theme) ? settings.theme : DEFAULT_APPEARANCE_SETTINGS.theme,
+        barWidth: settings.barWidth === 'fixed' || settings.barWidth === 'fit-content' || settings.barWidth === 'edge-to-edge'
+            ? settings.barWidth : DEFAULT_APPEARANCE_SETTINGS.barWidth,
+        rounding: settings.rounding === 'rounded' || settings.rounding === 'rounded-corners' || settings.rounding === 'rounded-top'
+            ? settings.rounding : DEFAULT_APPEARANCE_SETTINGS.rounding,
+    };
+}
 
 export type GGUserSettingsData = {
     username: string | null;
@@ -95,6 +111,11 @@ export type GGGamePrice = {
     isBestDeal: boolean;
 };
 
+export type GGGameSubscription = {
+    name: string;
+    url: string;
+};
+
 export type GGGame = {
     title: string;
     url: string;
@@ -102,6 +123,8 @@ export type GGGame = {
         currentRetail: GGGamePrice | null;
         currentKeyshops: GGGamePrice | null;
     };
+    // API order: cheapest subscription is first and used as the bar label
+    subscriptions?: GGGameSubscription[];
 };
 
 export type GGGameLookupResponse = {
@@ -737,6 +760,27 @@ export const loadBarEnabled = (): boolean => {
     return dropInvalidSettings(readSettingsFromLocalStorage()).barEnabled;
 }
 
+export async function loadSubscriptionsEnabledFromChromeStorage(): Promise<boolean> {
+    const result = await browser.storage.local.get([BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY]);
+    return result[BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY] !== false;
+}
+
+export async function saveSubscriptionsEnabled(subscriptionsEnabled: boolean): Promise<void> {
+    await browser.storage.local.set({ [BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY]: subscriptionsEnabled });
+}
+
+/** Updates both settings records without writing to the host page's localStorage. */
+export async function saveKeyshopsEnabled(keyshopsEnabled: boolean): Promise<void> {
+    const [settings, userSettings] = await Promise.all([
+        getNormalizedSettings(),
+        requestGGUserSettingsSync({ mode: 'auto' }),
+    ]);
+    await browser.storage.local.set({
+        [SETTINGS_STORAGE_KEY]: { ...settings, keyshopsEnabled },
+        [GG_USER_SETTINGS]: { ...userSettings, showKeyshops: keyshopsEnabled },
+    });
+}
+
 export const saveSettings = (data: SettingsData) => {
     const settings = dropInvalidSettings(data);
     if (!hasCompleteSettings(settings)) {
@@ -796,20 +840,21 @@ export const loadAppearanceSettings = (): SettingsAppearanceData => {
         const storedData = localStorage.getItem(APPEARANCE_STORAGE_KEY);
 
         if (!storedData) {
-            return DEFAULT_APPEARANCE_SETTINGS;
+            return normalizeAppearanceSettings(null);
         }
-        return JSON.parse(storedData) as SettingsAppearanceData;
+        return normalizeAppearanceSettings(JSON.parse(storedData));
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.warn('[gg.deals-extension] Failed to load appearance settings:', errorMessage);
-        return DEFAULT_APPEARANCE_SETTINGS;
+        return normalizeAppearanceSettings(null);
     }
 }
 
 export const saveAppearanceSettings = (data: SettingsAppearanceData) => {
-    localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(data));
+    const appearance = normalizeAppearanceSettings(data);
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
 
-    void browser.storage.local.set({ [APPEARANCE_STORAGE_KEY]: data }).catch((error: unknown) => {
+    void browser.storage.local.set({ [APPEARANCE_STORAGE_KEY]: appearance }).catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.warn('[gg.deals-extension] Failed to sync appearance settings to browser.storage.local:', errorMessage);
     });
@@ -891,11 +936,17 @@ function readStoredGGUserSettings(): GGUserSettingsData | null {
 }
 
 /**
-    Returns complete user settings: the stored ones when they are usable, otherwise the ones
+    Returns complete user settings: browser storage first, then the local mirror, otherwise the ones
     fetched from GG.deals. Platform, region and keyshops are never made up locally.
     Fetch errors are not caught, preventing extension from using fallback or incomplete data
  */
 export async function loadGGUserSettings(): Promise<GGUserSettingsData> {
+    const browserUserSettings = await loadGGUserSettingsFromChromeStorage();
+    if (isGGUserSettingsResponse(browserUserSettings)) {
+        saveGGUserSettingsToLocalStorage(browserUserSettings);
+        return browserUserSettings;
+    }
+
     const storedUserSettings = readStoredGGUserSettings();
 
     if (storedUserSettings) {
@@ -996,7 +1047,8 @@ export async function fetchGGUserSettings(
 export function fetchGuestGGUserSettings(): Promise<GGUserSettingsData> {
     return fetchGGUserSettings(null, {
         includeApiKeyHeader: false,
-        credentials: 'omit',
+        // Custom-site builds may need HTTP Basic Auth to reach the dev server
+        credentials: import.meta.env.VITE_GG_GUEST_CREDENTIALS === 'include' ? 'include' : 'omit',
     });
 }
 

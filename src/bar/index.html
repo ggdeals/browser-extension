@@ -1,5 +1,5 @@
 <!-- layout-rounded | layout-rounded-corners | layout-rounded-top | layout-bottom-edge -->
-<div class="gg-bottom-bar layout-rounded theme-dark" role="region" aria-label="GG.deals bar">
+<div class="gg-bottom-bar layout-rounded-top theme-dark" role="region" aria-label="GG.deals bar">
     <div class="gg-bar-content-wrapper">
         <a href="https://gg.deals" title="Go to GG.deals" class="gg-logo" target="_blank" rel="external">
             <svg class="svg-icon" width="139" height="80" viewBox="0 0 139 80" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -63,8 +63,40 @@
                     <div class="gg-game-price-value game-price-keyshop"></div>
                 </div>
             </div>
+
+            <!-- subscriptions are rendered dynamically by renderGameData() in js/source.ts;
+                 the cheapest is shown on the bar, with an alphabetical dropdown for multiple
+                 subscriptions and an em dash when the game has none -->
+            <!-- single subscription:
+            <div class="gg-bar-game-subs">
+                <div class="gg-game-price-label" data-i18n="barSubsLabel">Subs:</div>
+                <a href="https://gg.deals/" class="gg-bar-subs-label" target="_blank" rel="external">PC Game Pass</a>
+            </div>
+            -->
+            <!-- multiple subscriptions (dropdown):
+            <div class="gg-bar-game-subs">
+                <div class="gg-game-price-label" data-i18n="barSubsLabel">Subs:</div>
+                <div class="gg-bar-dropdown gg-bar-subs-dropdown dropdown-left">
+                    <button type="button" class="gg-options-btn" data-action="bar-dropdown-trigger">
+                        <span class="gg-bar-subs-label gg-bar-dropdown-active">PC Game Pass +2</span>
+                        <span class="gg-bar-dropdown-arrow">(arrow svg)</span>
+                    </button>
+                    <div class="gg-options-list">
+                        <div class="gg-game-price-label gg-bar-subs-header" data-i18n="barSubsHeader">Subscriptions:</div>
+                        <a href="https://gg.deals/" class="gg-option-single" target="_blank" rel="external">
+                            <span class="gg-option-label">PC Game Pass</span>
+                        </a>
+                        ...
+                    </div>
+                </div>
+            </div>
+            -->
+
             <div class="gg-bar-game-actions">
-                <a href="#game" class="gg-bar-game-link" target="_blank" rel="external" data-gg-game-info="gameUrl" data-i18n="barViewOnGgDeals">View on GG.deals</a>
+                <a href="#game" class="gg-bar-game-link" target="_blank" rel="external" data-gg-game-info="gameUrl">
+                    <span class="gg-bar-game-link-long" data-i18n="barViewOnGgDeals">View on GG.deals</span>
+                    <span class="gg-bar-game-link-short">GG.deals</span>
+                </a>
                 <!-- DEBUG_ONLY_START -->
                 <div class="gg-bar-debug">
                     <button type="button" class="gg-bar-debug-trigger" aria-label="Show request debugging data" aria-controls="gg-bar-debug-panel">
@@ -114,11 +146,27 @@
                         <span class="gg-option-label" data-i18n="barChangeAppearance">Change Appearance</span>
                     </div>
                     <div class="gg-option-single" data-action="hide-on-page" id="gg-price-settings">
-                        <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
+                        <svg class="svg-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M14.2733 7.72016L8.27325 1.72016C8.02326 1.47222 7.68535 1.33322 7.33325 1.3335H2.66659C2.31296 1.3335 1.97383 1.47397 1.72378 1.72402C1.47373 1.97407 1.33325 2.31321 1.33325 2.66683V7.3335C1.33311 7.50944 1.3678 7.68367 1.4353 7.84614C1.50281 8.00862 1.60181 8.15613 1.72659 8.28016L7.72659 14.2802C7.97657 14.5281 8.31449 14.6671 8.66659 14.6668C9.01964 14.6653 9.35769 14.5239 9.60659 14.2735L14.2733 9.60683C14.5236 9.35793 14.6651 9.01988 14.6666 8.66683C14.6667 8.49089 14.632 8.31666 14.5645 8.15419C14.497 7.99171 14.398 7.8442 14.2733 7.72016ZM8.66659 13.3335L2.66659 7.3335V2.66683H7.33325L13.3333 8.66683M4.33325 3.3335C4.53103 3.3335 4.72437 3.39215 4.88882 3.50203C5.05327 3.61191 5.18144 3.76809 5.25713 3.95081C5.33282 4.13354 5.35262 4.33461 5.31404 4.52859C5.27545 4.72257 5.18021 4.90075 5.04036 5.0406C4.90051 5.18046 4.72232 5.2757 4.52834 5.31428C4.33436 5.35287 4.1333 5.33306 3.95057 5.25738C3.76784 5.18169 3.61166 5.05352 3.50178 4.88907C3.3919 4.72462 3.33325 4.53128 3.33325 4.3335C3.33325 4.06828 3.43861 3.81393 3.62615 3.62639C3.81368 3.43885 4.06804 3.3335 4.33325 3.3335Z" fill="currentColor"/>
                         </svg>
                         <span class="gg-option-label" data-i18n="barPriceSettings">Price settings</span>
                     </div>
+                    <button type="button" class="gg-option-single" data-action="subscriptions-toggle" id="gg-subscription-settings">
+                        <svg class="svg-icon" xmlns="http://www.w3.org/2000/svg" width="17.306" height="17" viewBox="0 0 17.306 17" aria-hidden="true">
+                            <g transform="translate(-4.791 -4.886)">
+                                <path d="M12.84,10.577c1.355-3.057,3.645-5.191,7.205-5.191s5.851,2.133,7.205,5.191" transform="translate(-6.389 0)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+                                <path d="M8.808,29.11,6.387,30.1l-.944-2.311" transform="translate(0 -19.348)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+                                <path d="M24.133,84.686c-1.355,3.057-3.645,5.191-7.205,5.191s-5.851-2.133-7.205-5.191" transform="translate(-3.696 -68.491)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+                                <path d="M98.153,84.4l2.421-.989.944,2.311" transform="translate(-80.073 -67.387)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+                                <g transform="translate(9.28 9.964)">
+                                    <g transform="translate(0 0)">
+                                        <path d="M42.3,39.249a.94.94,0,0,0-1.328,0l-4.192,4.192-1.6-1.6a.94.94,0,0,0-1.328,1.329l2.276,2.276a.938.938,0,0,0,1.326,0l0,0,4.857-4.857a.94.94,0,0,0,0-1.329Z" transform="translate(-33.595 -38.974)" fill="currentColor" />
+                                    </g>
+                                </g>
+                            </g>
+                        </svg>
+                        <span class="gg-option-label" data-i18n="barDisableSubscriptions">Disable subscriptions</span>
+                    </button>
                     <div class="gg-option-single" data-action="bar-minimize">
                         <svg class="svg-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M8 5.5A2.5 2.5 0 1 0 8 10.5A2.5 2.5 0 1 0 8 5.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>

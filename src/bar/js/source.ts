@@ -83,17 +83,13 @@ import {
     API_GAMES_URL,
     BAR_THEME_DARK,
     BAR_THEME_LIGHT,
-    BAR_THEME_SYSTEM,
-    DEFAULT_BAR_THEME,
     BAR_LAYOUT_ROUNDED,
     BAR_LAYOUT_ROUNDED_CORNERS,
     BAR_LAYOUT_ROUNDED_TOP,
     BAR_LAYOUT_BOTTOM_EDGE,
-    DEFAULT_BAR_LAYOUT,
     BAR_WIDTH_FIXED,
     BAR_WIDTH_FIT_CONTENT,
     BAR_WIDTH_EDGE_TO_EDGE,
-    DEFAULT_BAR_WIDTH,
 } from './constants';
 import { extractPageIdentityFromLdJson } from './ld-json-helpers';
 import { resolveBottomBarPageContext, waitForRequiredDomainTitle } from '../integrations';
@@ -101,20 +97,28 @@ import {
     loadGGUserSettingsFromChromeStorage,
     loadSettingsFromChromeStorage,
     getNormalizedSettings,
+    loadSubscriptionsEnabledFromChromeStorage,
+    saveSubscriptionsEnabled,
     isInvalidApiKeyResponse,
     clearGGUserCredentials,
+    normalizeAppearanceSettings,
     type GGGame,
     type GGGameLookupResponse,
+    type GGGameSubscription,
     type SettingsData,
+    type SettingsAppearanceData,
 } from '../../utils/extension-settings';
 import {
     APPEARANCE_STORAGE_KEY,
+    BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY,
     EXCLUDED_WEBSITES_STORAGE_KEY,
     GG_USER_SETTINGS,
     SETTINGS_STORAGE_KEY
 } from '../../utils/extension-settings-constants';
 import browser from 'webextension-polyfill';
+import { t } from '../../utils/i18n';
 import type { BarGameRequestPayload, BarGamesRequestPayload } from '../integrations/types';
+import { observeBarResponsiveLayout, updateBarResponsiveLayout } from './responsive';
 
 type ProductUrlRule = string | RegExp;
 
@@ -246,6 +250,7 @@ let barChange_TO: any;
 const appliedBarAppearance = new WeakMap<HTMLElement, Required<AppearanceSettingsPayload>>();
 
 const KEYSHOPS_HIDDEN_CLASS = 'keyshops-hidden';
+const SUBSCRIPTIONS_HIDDEN_CLASS = 'subscriptions-hidden';
 const DOMAIN_HIDDEN_CLASS = 'domain-hidden';
 let appearanceChangeListenerInstalled = false;
 let systemThemeChangeListenerInstalled = false;
@@ -396,6 +401,91 @@ export function isSupportedProductPage(url: string): boolean {
     });
 }
 
+function getGameSubscriptions(gameData: GameEntry): GGGameSubscription[] {
+    if (!Array.isArray(gameData.subscriptions)) {
+        return [];
+    }
+
+    return gameData.subscriptions
+        .filter((subscription) => typeof subscription?.name === 'string' && subscription.name.trim().length > 0
+            && typeof subscription.url === 'string' && subscription.url.length > 0)
+        .map((subscription) => ({ name: subscription.name.trim(), url: subscription.url }));
+}
+
+function createSubscriptionLink(subscription: GGGameSubscription, className: string): HTMLAnchorElement {
+    const link = document.createElement('a');
+    link.className = className;
+    link.href = subscription.url;
+    link.target = '_blank';
+    link.rel = 'external';
+
+    return link;
+}
+
+function createSubscriptionsValue(subscriptions: GGGameSubscription[]): HTMLElement {
+    if (subscriptions.length === 0) {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'gg-bar-subs-label';
+        placeholder.textContent = '—';
+        return placeholder;
+    }
+
+    if (subscriptions.length === 1) {
+        const link = createSubscriptionLink(subscriptions[0], 'gg-bar-subs-label');
+        link.textContent = subscriptions[0].name;
+        return link;
+    }
+
+    const dropdownWrapper = document.createElement('div');
+    dropdownWrapper.className = 'gg-bar-dropdown gg-bar-subs-dropdown dropdown-left';
+
+    const triggerButton = document.createElement('button');
+    triggerButton.className = 'gg-options-btn';
+    triggerButton.dataset.action = 'bar-dropdown-trigger';
+    triggerButton.type = 'button';
+
+    const activeLabel = document.createElement('span');
+    activeLabel.className = 'gg-bar-subs-label gg-bar-dropdown-active';
+    // Keep the cheapest-first API order for the bar; sort only the dropdown below.
+    activeLabel.textContent = `${subscriptions[0].name} +${subscriptions.length - 1}`;
+
+    const arrow = document.createElement('span');
+    arrow.className = 'gg-bar-dropdown-arrow';
+    arrow.appendChild(createTitleDropdownArrowIcon());
+
+    triggerButton.appendChild(activeLabel);
+    triggerButton.appendChild(arrow);
+    dropdownWrapper.appendChild(triggerButton);
+
+    const optionsList = document.createElement('div');
+    optionsList.className = 'gg-options-list';
+
+    const header = document.createElement('div');
+    header.className = 'gg-game-price-label gg-bar-subs-header';
+    header.textContent = t('barSubsHeader');
+    optionsList.appendChild(header);
+
+    [...subscriptions].sort((a, b) => a.name.localeCompare(b.name)).forEach((subscription) => {
+        const option = createSubscriptionLink(subscription, 'gg-option-single');
+
+        const label = document.createElement('span');
+        label.className = 'gg-option-label';
+        label.textContent = subscription.name;
+
+        option.appendChild(label);
+        optionsList.appendChild(option);
+    });
+
+    dropdownWrapper.appendChild(optionsList);
+
+    triggerButton.addEventListener('click', (event: MouseEvent): void => {
+        event.stopPropagation();
+        dropdownWrapper.classList.toggle('open');
+    });
+
+    return dropdownWrapper;
+}
+
 function renderGameData(container: HTMLElement, data: GameDataResponse): void {
     const entries = data.data;
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -406,6 +496,22 @@ function renderGameData(container: HTMLElement, data: GameDataResponse): void {
     const gameLink = container.querySelector<HTMLAnchorElement>('.gg-bar-game-link');
     const fullLink = container.querySelector<HTMLAnchorElement>('.full-link');
     const titleRoot = container.querySelector<HTMLElement>('.gg-bar-game-title');
+
+    const renderSubscriptions = (gameData: GameEntry): void => {
+        container.querySelector('.gg-bar-game-subs')?.remove();
+
+        const subscriptions = getGameSubscriptions(gameData);
+        const subsContainer = document.createElement('div');
+        subsContainer.className = 'gg-bar-game-subs';
+
+        const label = document.createElement('div');
+        label.className = 'gg-game-price-label';
+        label.textContent = t('barSubsLabel');
+
+        subsContainer.appendChild(label);
+        subsContainer.appendChild(createSubscriptionsValue(subscriptions));
+        container.insertBefore(subsContainer, container.querySelector('.gg-bar-game-actions'));
+    };
 
     const renderSelectedGame = (gameData: GameEntry): void => {
         const name = typeof gameData.title === 'string' && gameData.title.trim().length > 0
@@ -428,6 +534,8 @@ function renderGameData(container: HTMLElement, data: GameDataResponse): void {
             const priceRetailContainer = offersContainer.querySelector('.game-price-retail');
             if (priceRetailContainer) {
                 priceRetailContainer.textContent = priceRetail;
+                priceRetailContainer.setAttribute('data-historical-label', t('historicalLow'));
+                priceRetailContainer.setAttribute('data-historical-abbreviation', t('historicalLowAbbreviation'));
 
                 if (priceRetailHistorical) {
                     priceRetailContainer.classList.add('historical');
@@ -439,6 +547,8 @@ function renderGameData(container: HTMLElement, data: GameDataResponse): void {
             const priceKeyshopContainer = offersContainer.querySelector('.game-price-keyshop');
             if (priceKeyshopContainer) {
                 priceKeyshopContainer.textContent = priceKeyshop;
+                priceKeyshopContainer.setAttribute('data-historical-label', t('historicalLow'));
+                priceKeyshopContainer.setAttribute('data-historical-abbreviation', t('historicalLowAbbreviation'));
 
                 if (priceKeyshopHistorical) {
                     priceKeyshopContainer.classList.add('historical');
@@ -448,8 +558,11 @@ function renderGameData(container: HTMLElement, data: GameDataResponse): void {
             }
         }
 
+        renderSubscriptions(gameData);
+
         if (gameLink && gameUrl) {
             gameLink.setAttribute('href', gameUrl);
+            gameLink.title = t('barViewOnGgDeals');
         }
 
         if (fullLink && gameUrl) {
@@ -567,64 +680,37 @@ function setBarLayout(barElement: HTMLElement, layoutTheme: string): void {
     barElement.classList.remove('layout-rounded-top');
     barElement.classList.remove('layout-bottom-edge');
 
-    if (layoutTheme === BAR_LAYOUT_BOTTOM_EDGE) {
-        barElement.classList.remove('width-fixed');
-        barElement.classList.remove('width-fit-content');
-    }
-
     barElement.classList.add('layout-' + layoutTheme);
 }
 
 function setBarWidth(barElement: HTMLElement, barWidth: string): void {
-    if (barWidth !== BAR_WIDTH_FIXED && barWidth !== BAR_WIDTH_FIT_CONTENT) {
+    if (barWidth !== BAR_WIDTH_FIXED && barWidth !== BAR_WIDTH_FIT_CONTENT && barWidth !== BAR_WIDTH_EDGE_TO_EDGE) {
         return;
     }
 
     barElement.classList.remove('width-fixed');
     barElement.classList.remove('width-fit-content');
+    barElement.classList.remove('width-edge-to-edge');
     barElement.classList.add('width-' + barWidth);
 }
 
-function resolveTheme(theme: string | undefined): string {
+function resolveTheme(theme: SettingsAppearanceData['theme']): string {
     if (theme === BAR_THEME_DARK || theme === BAR_THEME_LIGHT) {
         return theme;
     }
 
-    if (theme === BAR_THEME_SYSTEM) {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? BAR_THEME_DARK : BAR_THEME_LIGHT;
-    }
-
-    return DEFAULT_BAR_THEME;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? BAR_THEME_DARK : BAR_THEME_LIGHT;
 }
 
-function resolveLayout(layout: string | undefined, width: string): string {
-    if (width === BAR_WIDTH_EDGE_TO_EDGE) {
-        return BAR_LAYOUT_BOTTOM_EDGE;
-    }
-
-    if (layout === BAR_LAYOUT_ROUNDED
-        || layout === BAR_LAYOUT_ROUNDED_CORNERS
-        || layout === BAR_LAYOUT_ROUNDED_TOP
-        || layout === BAR_LAYOUT_BOTTOM_EDGE) {
-        return layout;
-    }
-
-    return DEFAULT_BAR_LAYOUT;
-}
-
-function resolveBarWidth(width: string | undefined): string {
-    if (width === BAR_WIDTH_FIXED || width === BAR_WIDTH_FIT_CONTENT || width === BAR_WIDTH_EDGE_TO_EDGE) {
-        return width;
-    }
-
-    return DEFAULT_BAR_WIDTH;
+function resolveLayout(layout: SettingsAppearanceData['rounding'], width: SettingsAppearanceData['barWidth']): string {
+    return width === BAR_WIDTH_EDGE_TO_EDGE ? BAR_LAYOUT_BOTTOM_EDGE : layout;
 }
 
 function applyAppearanceToBar(barElement: HTMLElement, settings: AppearanceSettingsPayload | null, force: boolean = false): void {
-    // if possible - timeouts and toggling 'shown' class gonna be only needed for layout === 'bottom-edge'
-    const barWidth = resolveBarWidth(settings?.barWidth);
-    const theme = resolveTheme(settings?.theme);
-    const layout = resolveLayout(settings?.rounding, barWidth);
+    const appearance = normalizeAppearanceSettings(settings);
+    const barWidth = appearance.barWidth;
+    const theme = resolveTheme(appearance.theme);
+    const layout = resolveLayout(appearance.rounding, barWidth);
     const previousAppearance = appliedBarAppearance.get(barElement);
     const themeChanged = force || previousAppearance?.theme !== theme;
     const barWidthChanged = force || previousAppearance?.barWidth !== barWidth;
@@ -655,6 +741,7 @@ function applyAppearanceToBar(barElement: HTMLElement, settings: AppearanceSetti
             barWidth,
             rounding: layout,
         });
+        updateBarResponsiveLayout(barElement);
     };
 
     if (force) {
@@ -769,15 +856,58 @@ async function syncBarAppearanceFromStorage(barElement: HTMLElement): Promise<vo
 
 function applyKeyshopsVisibility(barElement: HTMLElement, keyshopsEnabled: boolean): void {
     barElement.classList.toggle(KEYSHOPS_HIDDEN_CLASS, !keyshopsEnabled);
+    updateBarResponsiveLayout(barElement);
 }
 
-async function syncKeyshopsVisibilityFromStorage(barElement: HTMLElement): Promise<void> {
-    const settings = await loadSettingsFromChromeStorage();
-    if (!settings || currentBarElement !== barElement) {
+function applySubscriptionsVisibility(barElement: HTMLElement, subscriptionsEnabled: boolean): void {
+    barElement.classList.toggle(SUBSCRIPTIONS_HIDDEN_CLASS, !subscriptionsEnabled);
+    updateBarResponsiveLayout(barElement);
+    const label = barElement.querySelector<HTMLElement>('#gg-subscription-settings .gg-option-label');
+    if (label) {
+        label.dataset.i18n = subscriptionsEnabled ? 'barDisableSubscriptions' : 'barEnableSubscriptions';
+        label.textContent = t(label.dataset.i18n);
+    }
+}
+
+function bindBarSettingToggle(barElement: HTMLElement, selector: string, toggle: () => Promise<void>): void {
+    const button = barElement.querySelector<HTMLButtonElement>(selector);
+    if (!button) {
+        return;
+    }
+    button.addEventListener('click', async (): Promise<void> => {
+        if (button.disabled) {
+            return;
+        }
+        button.disabled = true;
+        try {
+            await toggle();
+            closeGgDropdowns(barElement);
+            await browser.runtime.sendMessage({
+                type: 'OPEN_POPUP',
+                tab: 'settings',
+                settingsScrollTarget: 'bottom',
+            });
+        } catch (error: unknown) {
+            console.warn('[gg.deals-extension] Failed to toggle bar setting or open settings:', error);
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
+async function syncBarContentVisibilityFromStorage(barElement: HTMLElement): Promise<void> {
+    const [settings, subscriptionsSettings] = await Promise.all([
+        loadSettingsFromChromeStorage(),
+        browser.storage.local.get([BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY]),
+    ]);
+    if (currentBarElement !== barElement) {
         return;
     }
 
-    applyKeyshopsVisibility(barElement, settings.keyshopsEnabled);
+    if (settings) {
+        applyKeyshopsVisibility(barElement, settings.keyshopsEnabled);
+    }
+    applySubscriptionsVisibility(barElement, subscriptionsSettings[BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY] !== false);
 }
 
 function installAppearanceSyncListeners(): void {
@@ -792,8 +922,9 @@ function installAppearanceSyncListeners(): void {
 
         const appearanceChange = changes[APPEARANCE_STORAGE_KEY];
         const settingsChange = changes[SETTINGS_STORAGE_KEY];
+        const subscriptionsChange = changes[BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY];
         const excludedWebsitesChange = changes[EXCLUDED_WEBSITES_STORAGE_KEY];
-        if (!appearanceChange && !settingsChange && !excludedWebsitesChange) {
+        if (!appearanceChange && !settingsChange && !subscriptionsChange && !excludedWebsitesChange) {
             return;
         }
 
@@ -821,6 +952,10 @@ function installAppearanceSyncListeners(): void {
 
         if (!currentBarElement || !currentBarElement.isConnected) {
             return;
+        }
+
+        if (subscriptionsChange) {
+            applySubscriptionsVisibility(currentBarElement, subscriptionsChange.newValue !== false);
         }
 
         if (excludedWebsitesChange) {
@@ -1088,10 +1223,13 @@ export function onBottomBarInjected(barElement: HTMLElement): void {
     console.log('[gg.deals-extension] Bottom bar injected:', barElement);
 
     currentBarElement = barElement;
+    observeBarResponsiveLayout(barElement);
     installAppearanceSyncListeners();
     applyAppearanceToBar(barElement, null);
     void syncBarAppearanceFromStorage(barElement);
-    void syncKeyshopsVisibilityFromStorage(barElement);
+    void syncBarContentVisibilityFromStorage(barElement).catch((error: unknown) => {
+        console.warn('[gg.deals-extension] Failed to sync bar content visibility:', error);
+    });
     renderBarDebugData(barElement, pendingBarDebugData);
 
     const gameInfoContainer = barElement.querySelector<HTMLElement>('#gg-bottom-bar-game-info');
@@ -1157,6 +1295,11 @@ export function onBottomBarInjected(barElement: HTMLElement): void {
         });
     }
 
+    bindBarSettingToggle(barElement, '#gg-subscription-settings', async () => {
+        const enabled = await loadSubscriptionsEnabledFromChromeStorage();
+        await saveSubscriptionsEnabled(!enabled);
+    });
+
     const alwaysHide = document.querySelector<HTMLElement>('#gg-always-hide');
     if (alwaysHide) {
         alwaysHide.addEventListener('click', (): void => {
@@ -1164,6 +1307,7 @@ export function onBottomBarInjected(barElement: HTMLElement): void {
                 type: 'OPEN_POPUP',
                 tab: 'settings',
                 settingsScrollTarget: 'bottom',
+                settingsShowBlacklistAlert: true,
             });
 
             void addCurrentDomainToExcludedWebsites().finally(() => {

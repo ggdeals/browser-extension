@@ -111,6 +111,12 @@
   "settingsKeyshopsDescription": {
     "message": "Rialaigh taispeáint praghsanna ó shiopaí eochracha."
   },
+  "settingsSubscriptionsTitle": {
+    "message": "Síntiúis"
+  },
+  "settingsSubscriptionsDescription": {
+    "message": "Taispeáin faisnéis faoi shíntiúis i mbarra GG.deals."
+  },
   "settingsBarTitle": {
     "message": "Barra GG.deals"
   },
@@ -295,6 +301,18 @@
   },
   "barKeyshopLabel": {
     "message": "Siopa eochracha:"
+  },
+  "barSubsLabel": {
+    "message": "Subs:"
+  },
+  "barSubsHeader": {
+    "message": "Síntiúis:"
+  },
+  "barDisableSubscriptions": {
+    "message": "Díchumasaigh síntiúis"
+  },
+  "barEnableSubscriptions": {
+    "message": "Cumasaigh síntiúis"
   },
   "barViewOnGgDeals": {
     "message": "Féach ar GG.deals"

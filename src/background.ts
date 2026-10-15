@@ -65,6 +65,7 @@ import {
   GG_USER_SETTINGS,
   POPUP_INITIAL_TAB_STORAGE_KEY,
   POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY,
+  POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY,
 } from './settings/constants';
 import browser from "webextension-polyfill";
 
@@ -163,6 +164,7 @@ type OpenPopupMessage = {
   type: 'OPEN_POPUP';
   tab?: 'deals' | 'settings' | 'appearance';
   settingsScrollTarget?: 'bottom';
+  settingsShowBlacklistAlert?: boolean;
 };
 
 type UpdateBadgeMessage = {
@@ -2890,6 +2892,7 @@ browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { tab?
     try {
       const payload: Record<string, unknown> = {
         [POPUP_INITIAL_TAB_STORAGE_KEY]: message?.tab,
+        [POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY]: message.settingsShowBlacklistAlert === true,
       };
 
       if (message?.settingsScrollTarget === 'bottom') {

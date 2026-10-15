@@ -8,6 +8,7 @@ export {
 export const POPUP_INITIAL_TAB_STORAGE_KEY: string = 'popupInitialTab';
 export const POPUP_LAST_ACTIVE_TAB_STORAGE_KEY: string = 'popupLastActiveTab';
 export const POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY: string = 'popupSettingsScrollTarget';
+export const POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY: string = 'popupSettingsShowBlacklistAlert';
 export const POPUP_SETTINGS_SCROLL_TARGET_BOTTOM: string = 'bottom';
 export const GG_DEALS_LOGIN_URL: string = 'https://gg.deals/login/';
 

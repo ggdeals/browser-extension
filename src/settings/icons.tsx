@@ -205,3 +205,19 @@ export function ICON_USER_LOGOUT() {
         <path d="M2.66659 4.33333C2.66659 3.78105 3.1143 3.33333 3.66659 3.33333H7.33325C7.70144 3.33333 7.99992 3.03486 7.99992 2.66667C7.99992 2.29848 7.70144 2 7.33325 2H2.66659C1.93325 2 1.33325 2.6 1.33325 3.33333V12.6667C1.33325 13.4 1.93325 14 2.66659 14H7.33325C7.70144 14 7.99992 13.7015 7.99992 13.3333C7.99992 12.9651 7.70144 12.6667 7.33325 12.6667H3.66659C3.1143 12.6667 2.66659 12.219 2.66659 11.6667V4.33333Z" fill="currentColor"/>
     </svg>);
 }
+
+export function ICON_SUBSCRIPTIONS() {
+    return (<svg className="svg-icon" xmlns="http://www.w3.org/2000/svg" width="17.306" height="17" viewBox="0 0 17.306 17" aria-hidden="true">
+        <g transform="translate(-4.791 -4.886)">
+            <path d="M12.84,10.577c1.355-3.057,3.645-5.191,7.205-5.191s5.851,2.133,7.205,5.191" transform="translate(-6.389 0)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+            <path d="M8.808,29.11,6.387,30.1l-.944-2.311" transform="translate(0 -19.348)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+            <path d="M24.133,84.686c-1.355,3.057-3.645,5.191-7.205,5.191s-5.851-2.133-7.205-5.191" transform="translate(-3.696 -68.491)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+            <path d="M98.153,84.4l2.421-.989.944,2.311" transform="translate(-80.073 -67.387)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="1" />
+            <g transform="translate(9.28 9.964)">
+                <g transform="translate(0 0)">
+                    <path d="M42.3,39.249a.94.94,0,0,0-1.328,0l-4.192,4.192-1.6-1.6a.94.94,0,0,0-1.328,1.329l2.276,2.276a.938.938,0,0,0,1.326,0l0,0,4.857-4.857a.94.94,0,0,0,0-1.329Z" transform="translate(-33.595 -38.974)" fill="currentColor" />
+                </g>
+            </g>
+        </g>
+    </svg>);
+}

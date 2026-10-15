@@ -7,6 +7,8 @@ libraries in sync with your GG.deals account. Chrome and Firefox, Manifest V3.
 
 - **Price bar.** On a supported store or game-info page, a bar shows the current
   GG.deals retail and keyshop prices for that game and flags historical lows.
+  Available subscriptions link to GG.deals, with the cheapest on the bar and
+  an alphabetical dropdown when there are multiple subscriptions.
   66 site integrations ship with the extension; the bar only appears on a page
   one of them recognises, and you can exclude any domain from the Appearance
   tab.
@@ -120,6 +122,10 @@ Output directories follow `dist/<site>_<target>/`, so `--site=example.com`
 produces `dist/example.com_chrome/`. Versions are derived from the latest
 released tag plus a counter, so dev builds always sort above the released
 extension.
+
+Builds for a custom `--site` send credentials with guest settings requests so
+they can use HTTP Basic Auth on development servers. This also sends available
+site cookies. Builds for `gg.deals` omit credentials for these guest requests.
 
 ## License
 

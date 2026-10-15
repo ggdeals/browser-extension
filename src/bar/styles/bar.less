@@ -3,6 +3,7 @@
 @screen-md-min: 1030px;
 @screen-lg-min: 1200px;
 @screen-xl-min: 1290px;
+@bar-max-width: 1280px;
 
 @global-color-white: #FFF;
 @global-color-grey-0-5: #F9FAFA;
@@ -78,6 +79,7 @@
 }
 
 .gg-bottom-bar {
+  --gg-bar-inline-layout: 0 !important;
   &.domain-hidden {
     display: none !important;
   }
@@ -108,6 +110,7 @@
   border-width: 1px 0 0 0 !important;
 
   @media (min-width: @screen-sm-min) {
+    --gg-bar-inline-layout: 1 !important;
     transition: margin .2s ease, 
       bottom .2s ease, left .15s ease, 
       max-width .15s ease .1s, 
@@ -178,7 +181,7 @@
   }
 
   &.layout-rounded {
-    max-width: 1280px !important;
+    max-width: @bar-max-width !important;
 
     @media (min-width: @screen-sm-min) {
       border-width: 1px !important;
@@ -190,7 +193,7 @@
     }
   }
   &.layout-rounded-corners {
-    max-width: 1280px !important;
+    max-width: @bar-max-width !important;
 
     @media (min-width: @screen-sm-min) {
       border-width: 1px !important;
@@ -207,7 +210,7 @@
     max-width .15s linear .1s, 
     transform .2s linear, 
     border-radius .2s linear .1s !important;
-    max-width: 1280px !important;
+    max-width: @bar-max-width !important;
 
     @media (min-width: @screen-sm-min) {
       border-width: 1px 1px 0 1px !important;
@@ -252,8 +255,8 @@
   &.width-fit-content {
     @media (min-width: @screen-sm-min) {
       width: fit-content !important;
-      max-width: calc(100% - 32px) !important;
-      min-width: max-content !important;
+      max-width: min(@bar-max-width, calc(100% - 32px)) !important;
+      min-width: 0 !important;
     }
 
     .gg-bar-content-wrapper {
@@ -264,6 +267,8 @@
   }
 
   .gg-bar-content-wrapper {
+    min-width: 0 !important;
+    max-width: 100% !important;
     position: relative !important;
     display: flex !important;
     flex-direction: row !important;
@@ -291,7 +296,8 @@
     flex-direction: row !important;
     flex-wrap: wrap !important;
     opacity: 1 !important;
-    flex: 1 0 auto !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
     gap: 4px 12px !important;
     align-items: baseline !important;
     max-width: calc(100% - 16px - 28px - 16px - 20px) !important;
@@ -306,12 +312,14 @@
     @media (min-width: @screen-sm-min) {
       flex-wrap: nowrap !important;
       gap: 24px !important;
+      max-width: none !important;
     }
     @media (min-width: @screen-md-min) {
       gap: 32px !important;
     }
   }
   .gg-bar-game-title {
+    min-width: 0 !important;
     flex: 0 0 100% !important;
     height: 16px !important;
     line-height: 16px !important;
@@ -321,6 +329,8 @@
     }
 
     .title-label {
+      display: block !important;
+      white-space: nowrap !important;
       font-size: 14px !important;
       line-height: 16px !important;
       height: 16px !important;
@@ -347,13 +357,6 @@
       flex: 0 0 auto !important;
     }
 
-    .gg-game-price-label {
-      font-size: 12px !important;
-      line-height: 16px !important;
-      font-weight: 700 !important;
-      text-transform: uppercase !important;
-      flex: 0 0 auto !important;
-    }
     .gg-game-price-value {
       display: flex !important;
       align-items: center !important;
@@ -375,7 +378,7 @@
           font-family: 'GG Lato', Tahoma, Arial, sans-serif !important;
           display: block !important;
           flex: 0 0 auto !important;
-          content: 'Historical Low' !important;
+          content: attr(data-historical-label) !important;
           font-size: 13px !important;
           line-height: 16px !important;
           border-radius: 4px !important;
@@ -412,7 +415,54 @@
       }
     }
   }
+  .gg-bar-game-offers,
+  .gg-bar-game-subs {
+    .gg-game-price-label {
+      font-size: 12px !important;
+      line-height: 16px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase !important;
+      flex: 0 0 auto !important;
+    }
+  }
+  .gg-bar-game-subs {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: baseline !important;
+    box-sizing: border-box !important;
+    white-space: nowrap !important;
+    flex: 0 0 100% !important;
+    height: 18px !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+
+    @media (min-width: @screen-sm-min) {
+      flex: 0 0 auto !important;
+      padding: 0 0 0 16px !important;
+      margin: 0 0 0 -8px !important;
+    }
+    @media (min-width: @screen-md-min) {
+      margin: 0 0 0 -16px !important;
+    }
+
+    .gg-bar-subs-label {
+      display: block !important;
+      font-size: 14px !important;
+      line-height: 16px !important;
+      font-weight: 700 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+
+    a.gg-bar-subs-label {
+      position: relative !important;
+      z-index: 22 !important;
+      text-decoration: none !important;
+    }
+  }
   .gg-bar-game-actions {
+    flex: 0 0 auto !important;
     position: relative !important;
     z-index: 22 !important;
     display: none !important;
@@ -424,6 +474,50 @@
     }
   }
 
+  &.compact-historical .gg-game-price-value.historical::after {
+    content: attr(data-historical-abbreviation) !important;
+  }
+
+  .gg-bar-game-link-short {
+    display: none !important;
+  }
+
+  &.compact-game-link {
+    .gg-bar-game-link-long {
+      display: none !important;
+    }
+    .gg-bar-game-link-short {
+      display: inline !important;
+    }
+  }
+
+  &.compact-spacing {
+    .gg-bar-game-title {
+      min-width: 64px !important;
+    }
+    .gg-bar-content-wrapper {
+      column-gap: 12px !important;
+    }
+    .gg-bar-content {
+      column-gap: 12px !important;
+    }
+    .gg-game-price:has(+ .gg-game-price) {
+      padding-right: 8px !important;
+    }
+    .gg-game-price + .gg-game-price {
+      padding-left: 9px !important;
+    }
+    .gg-bar-game-subs {
+      flex: 0 1 auto !important;
+      margin-left: 0 !important;
+      padding-left: 12px !important;
+    }
+  }
+
+  &.game-link-hidden .gg-bar-game-actions {
+    display: none !important;
+  }
+
   a.gg-bar-game-link {
     transition: color .2s ease !important;
     will-change: color, contents !important;
@@ -433,6 +527,7 @@
     text-decoration: none !important;
     position: relative !important;
     display: block !important;
+    white-space: nowrap !important;
     padding: 0 12px 0 0 !important;
 
     &::after {
@@ -545,6 +640,18 @@
     }
   }
 
+  &.subscriptions-hidden .gg-bar-game-subs {
+    display: none !important;
+  }
+
+  .gg-bar-game-title-dropdown .gg-options-btn {
+    max-width: 100% !important;
+
+    .title-label {
+      min-width: 0 !important;
+    }
+  }
+
   .gg-bar-dropdown {
     position: relative !important;
     z-index: 22 !important;
@@ -592,10 +699,49 @@
       }
     }
 
+    &.gg-bar-subs-dropdown {
+      min-width: 0 !important;
+      max-width: 100% !important;
+
+      .gg-options-btn {
+        min-width: 0 !important;
+        max-width: 100% !important;
+      }
+
+      .gg-options-list {
+        width: max-content !important;
+        min-width: 100% !important;
+        max-width: min(280px, calc(100vw - 112px)) !important;
+        max-height: calc(100vh - 120px) !important;
+        overflow-y: auto !important;
+
+        @media (min-width: @screen-sm-min) {
+          max-width: min(280px, calc(100vw - 32px)) !important;
+        }
+      }
+
+      .gg-bar-subs-header {
+        padding: 8px 16px 4px !important;
+      }
+
+      .gg-option-single {
+        height: auto !important;
+        min-height: 32px !important;
+        flex: 0 0 auto !important;
+        white-space: normal !important;
+
+        .gg-option-label {
+          line-height: 20px !important;
+          overflow-wrap: anywhere !important;
+        }
+      }
+    }
+
     .gg-option-single {
       transition: background-color .2s ease !important;
       will-change: background-color !important;
       display: flex !important;
+      text-decoration: none !important;
       cursor: pointer !important;
       flex-direction: row !important;
       flex-wrap: nowrap !important;
@@ -825,10 +971,22 @@
         color: @global-color-white !important;
       }
     }
-    .gg-bar-game-offers {
+    .gg-bar-game-offers,
+    .gg-bar-game-subs {
       .gg-game-price-label {
         color: @dm-color-grey-10 !important;
       }
+    }
+    .gg-bar-game-subs {
+      @media (min-width: @screen-sm-min) {
+        border-left: 1px solid @dm-color-grey-15 !important;
+      }
+
+      .gg-bar-subs-label {
+        color: @global-color-white !important;
+      }
+    }
+    .gg-bar-game-offers {
       .gg-game-price-value {
         color: @global-color-white !important;
 
@@ -934,10 +1092,22 @@
         color: @global-color-grey-dark-2 !important;
       }
     }
-    .gg-bar-game-offers {
+    .gg-bar-game-offers,
+    .gg-bar-game-subs {
       .gg-game-price-label {
         color: @global-color-grey-7 !important;
       }
+    }
+    .gg-bar-game-subs {
+      @media (min-width: @screen-sm-min) {
+        border-left: 1px solid @global-color-grey-6 !important;
+      }
+
+      .gg-bar-subs-label {
+        color: @global-color-grey-dark-2 !important;
+      }
+    }
+    .gg-bar-game-offers {
       .gg-game-price-value {
         color: @global-color-grey-dark-2 !important;
 

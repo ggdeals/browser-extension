@@ -15,6 +15,8 @@ import {
     type TabKey,
     saveSettings,
     loadBarEnabled,
+    loadSubscriptionsEnabledFromChromeStorage,
+    saveSubscriptionsEnabled,
     loadAppearanceSettings,
     loadGGUserSettings,
     hasGGUserSettingsData,
@@ -34,13 +36,14 @@ import {
     loadCustomMessagesFromChromeStorage,
     type GGCustomMessage,
 } from '../utils/extension-settings';
-import { GG_CUSTOM_MESSAGES, GG_SERVER_MESSAGE_BADGE } from '../utils/extension-settings-constants';
+import { BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY, GG_CUSTOM_MESSAGES, GG_SERVER_MESSAGE_BADGE, GG_USER_SETTINGS } from '../utils/extension-settings-constants';
 import {
     GG_DEALS_LOGIN_URL,
     POPUP_INITIAL_TAB_STORAGE_KEY,
     POPUP_LAST_ACTIVE_TAB_STORAGE_KEY,
     POPUP_SETTINGS_SCROLL_TARGET_BOTTOM,
     POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY,
+    POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY,
     SETTINGS_THEME_DARK,
     SETTINGS_THEME_LIGHT,
     SETTINGS_THEME_SYSTEM,
@@ -115,6 +118,8 @@ function CustomMessageContent({ message }: { message: string }) {
 
 function ExtensionSettings() {
     const [barEnabled, setBarEnabled] = useState<boolean>(() => loadBarEnabled());
+    const [subscriptionsEnabled, setSubscriptionsEnabled] = useState<boolean | null>(null);
+    const [isSavingSubscriptions, setIsSavingSubscriptions] = useState(false);
     const [appearanceSettings, setAppearanceSettings] = useState<SettingsAppearanceData>(() => loadAppearanceSettings());
     // null until the initial load resolves - user settings are complete from then on
     const [userSettings, setUserSettings] = useState<GGUserSettingsData | null>(null);
@@ -129,6 +134,17 @@ function ExtensionSettings() {
 
     useEffect(() => {
         let isCancelled = false;
+        let subscriptionsPreferenceChanged = false;
+
+        void loadSubscriptionsEnabledFromChromeStorage()
+            .then((enabled) => {
+                if (!isCancelled && !subscriptionsPreferenceChanged) {
+                    setSubscriptionsEnabled(enabled);
+                }
+            })
+            .catch((error: unknown) => {
+                console.warn('[gg.deals-extension] Failed to load subscriptions visibility:', error);
+            });
 
         void acknowledgeServerMessageBadges().catch((error: unknown) => {
             console.warn('[gg.deals-extension] Failed to acknowledge server message badge:', error);
@@ -150,6 +166,19 @@ function ExtensionSettings() {
         ) => {
             if (areaName !== 'local' || isCancelled) {
                 return;
+            }
+
+            if (changes[BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY]) {
+                subscriptionsPreferenceChanged = true;
+                setSubscriptionsEnabled(changes[BAR_SUBSCRIPTIONS_ENABLED_STORAGE_KEY].newValue !== false);
+            }
+
+            const nextUserSettings = changes[GG_USER_SETTINGS]?.newValue as GGUserSettingsData | undefined;
+            if (nextUserSettings) {
+                saveGGUserSettingsToLocalStorage(nextUserSettings);
+                setUserSettings((current) => JSON.stringify(current) === JSON.stringify(nextUserSettings)
+                    ? current
+                    : nextUserSettings);
             }
 
             if (changes[GG_CUSTOM_MESSAGES]) {
@@ -298,6 +327,18 @@ function ExtensionSettings() {
         setUserSettings(nextUserSettings);
     }
 
+    async function updateSubscriptionsEnabled(enabled: boolean): Promise<void> {
+        setIsSavingSubscriptions(true);
+        try {
+            await saveSubscriptionsEnabled(enabled);
+            setSubscriptionsEnabled(enabled);
+        } catch (error: unknown) {
+            console.warn('[gg.deals-extension] Failed to save subscriptions visibility:', error);
+        } finally {
+            setIsSavingSubscriptions(false);
+        }
+    }
+
     function updateAppearanceSettings(patch: Partial<SettingsAppearanceData>) {
         setAppearanceSettings((previous) => {
             const next = {
@@ -341,17 +382,20 @@ function ExtensionSettings() {
     }, [activeTab]);
 
     useEffect(() => {
-        if (activeTab !== SETTINGS) {
+        if (activeTab !== SETTINGS || !userSettings) {
             return;
         }
 
-        browser.storage.session.get([POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY]).then((result) => {
+        browser.storage.session.get([
+            POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY,
+            POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY,
+        ]).then((result) => {
             const scrollTarget = result?.[POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY];
             if (scrollTarget !== POPUP_SETTINGS_SCROLL_TARGET_BOTTOM) {
                 return;
             }
 
-            setShowBlacklistAlert(true);
+            setShowBlacklistAlert(result[POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY] === true);
 
             requestAnimationFrame(() => {
                 const root = document.documentElement;
@@ -369,9 +413,12 @@ function ExtensionSettings() {
                 });
             });
 
-            void browser.storage.session.remove(POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY);
+            void browser.storage.session.remove([
+                POPUP_SETTINGS_SCROLL_TARGET_STORAGE_KEY,
+                POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY,
+            ]);
         });
-    }, [activeTab]);
+    }, [activeTab, userSettings]);
 
     useEffect(() => {
         if (!userSettings) {
@@ -621,12 +668,15 @@ function ExtensionSettings() {
                             platform={userSettings.platform}
                             region={userSettings.region}
                             keyshopsEnabled={userSettings.showKeyshops}
+                            subscriptionsEnabled={subscriptionsEnabled}
+                            isSavingSubscriptions={isSavingSubscriptions}
                             barEnabled={barEnabled}
                             showBlacklistAlert={showBlacklistAlert}
                             onSignInClick={handleSignInFetch}
                             onPlatformChange={(platform) => updateUserSettings(userSettings, { platform })}
                             onRegionChange={(region) => updateUserSettings(userSettings, { region })}
                             onKeyshopsEnabledChange={(showKeyshops) => updateUserSettings(userSettings, { showKeyshops })}
+                            onSubscriptionsEnabledChange={(enabled) => { void updateSubscriptionsEnabled(enabled); }}
                             onBarEnabledChange={setBarEnabled}
                         />
                         : <LoadingState />

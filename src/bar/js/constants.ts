@@ -11,15 +11,12 @@ export const GAMESPORIUM_PRODUCTS_PREFIX = 'https://gamesporium.com/products/';
 export const BAR_THEME_DARK = 'dark';
 export const BAR_THEME_LIGHT = 'light';
 export const BAR_THEME_SYSTEM = 'system';
-export const DEFAULT_BAR_THEME = BAR_THEME_DARK;
 
 export const BAR_LAYOUT_ROUNDED = 'rounded';
 export const BAR_LAYOUT_ROUNDED_CORNERS = 'rounded-corners';
 export const BAR_LAYOUT_ROUNDED_TOP = 'rounded-top';
 export const BAR_LAYOUT_BOTTOM_EDGE = 'bottom-edge';
-export const DEFAULT_BAR_LAYOUT = BAR_LAYOUT_ROUNDED_TOP;
 
 export const BAR_WIDTH_FIXED = 'fixed';
 export const BAR_WIDTH_FIT_CONTENT = 'fit-content';
 export const BAR_WIDTH_EDGE_TO_EDGE = 'edge-to-edge';
-export const DEFAULT_BAR_WIDTH = BAR_WIDTH_FIT_CONTENT;

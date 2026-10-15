@@ -138,6 +138,31 @@ export function SettingsTab(props: SettingsTabProps) {
                 </div>
             </section>
 
+            <section className={`gg-settings-pill${props.subscriptionsEnabled ? ' active' : ''}`}>
+                <div className="gg-settings-pill-icon">
+                    <Icons.ICON_SUBSCRIPTIONS />
+                </div>
+
+                <div className="gg-settings-pill-content">
+                    <div className="gg-settings-pill-title">{t('settingsSubscriptionsTitle')}</div>
+                    <div className="gg-settings-pill-desc">{t('settingsSubscriptionsDescription')}</div>
+                </div>
+
+                <div className="gg-settings-pill-switch">
+                    <label htmlFor="gg-ext-switch--subscriptions">
+                        <input
+                            id="gg-ext-switch--subscriptions"
+                            type="checkbox"
+                            aria-label={t('settingsSubscriptionsTitle')}
+                            checked={props.subscriptionsEnabled ?? true}
+                            disabled={props.subscriptionsEnabled === null || props.isSavingSubscriptions}
+                            onChange={(event) => props.onSubscriptionsEnabledChange((event.currentTarget as HTMLInputElement).checked)}
+                        />
+                        <span className="gg-ext-switch"></span>
+                    </label>
+                </div>
+            </section>
+
             <section className={`gg-settings-pill${props.barEnabled ? ' active' : ''}`}>
                 <div className="gg-settings-pill-icon">
                     <Icons.ICON_EXT_BAR />

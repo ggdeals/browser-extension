@@ -10,11 +10,13 @@ export {
     loadExcludedWebsitesFromChromeStorage,
     loadGGUserSettings,
     loadBarEnabled,
+    loadSubscriptionsEnabledFromChromeStorage,
     saveAppearanceSettings,
     saveExcludedWebsites,
     saveGGUserSettings,
     saveGGUserSettingsToLocalStorage,
     saveSettings,
+    saveSubscriptionsEnabled,
     signOutFromExtensionMemory,
     requestGGUserSettingsSync,
     withGGApiKeyHeader
@@ -140,12 +142,15 @@ export type SettingsTabProps = {
     platform: Platform;
     region: Region;
     keyshopsEnabled: boolean;
+    subscriptionsEnabled: boolean | null;
+    isSavingSubscriptions: boolean;
     barEnabled: boolean;
     showBlacklistAlert: boolean;
     onSignInClick?: () => void;
     onPlatformChange: (value: Platform) => void;
     onRegionChange: (value: Region) => void;
     onKeyshopsEnabledChange: (value: boolean) => void;
+    onSubscriptionsEnabledChange: (value: boolean) => void;
     onBarEnabledChange: (value: boolean) => void;
 };
 

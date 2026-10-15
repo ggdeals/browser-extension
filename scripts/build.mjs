@@ -790,6 +790,7 @@ function main() {
   const viteEnv = {
     BUILD_OUT_DIR: buildOutDir,
     VITE_BOTTOM_BAR_DEBUG: String(debugEnabled),
+    VITE_GG_GUEST_CREDENTIALS: site.isDefault ? 'omit' : 'include',
   };
 
   if (!site.isDefault) {

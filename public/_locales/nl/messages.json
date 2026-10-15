@@ -111,6 +111,12 @@
   "settingsKeyshopsDescription": {
     "message": "Bepaal of prijzen van keyshops worden weergegeven."
   },
+  "settingsSubscriptionsTitle": {
+    "message": "Abonnementen"
+  },
+  "settingsSubscriptionsDescription": {
+    "message": "Toon abonnementsinformatie in de GG.deals-balk."
+  },
   "settingsBarTitle": {
     "message": "GG.deals-balk"
   },
@@ -295,6 +301,18 @@
   },
   "barKeyshopLabel": {
     "message": "Keyshop:"
+  },
+  "barSubsLabel": {
+    "message": "Subs:"
+  },
+  "barSubsHeader": {
+    "message": "Abonnementen:"
+  },
+  "barDisableSubscriptions": {
+    "message": "Abonnementen uitschakelen"
+  },
+  "barEnableSubscriptions": {
+    "message": "Abonnementen inschakelen"
   },
   "barViewOnGgDeals": {
     "message": "Bekijken op GG.deals"
