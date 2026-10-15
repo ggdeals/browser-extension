@@ -1,3 +1,4 @@
+import { createAccountSync } from '../../utils/sync-account';
 import {
     EXTENSION_VERSION,
     EPIC_SOURCE_ID,
@@ -19,7 +20,6 @@ import {
     readTrimmedAttribute,
     resetSourceStateViaPageSyncWidget,
     restoreSyncElementSnapshot,
-    requestUserIdConsentViaPageSwal,
     sendMessageToServer,
     sendRuntimeMessage,
     snapshotSyncElement,
@@ -74,10 +74,6 @@ function isEpicEmptyDataError(error: unknown): boolean {
     const errorMessage = toErrorMessage(error);
     return errorMessage.includes('Epic collection is empty')
         || errorMessage.includes('Epic wishlist is empty');
-}
-
-function isEpicAccountMismatchError(error: unknown): boolean {
-    return toErrorMessage(error).includes('Invalid accountId:');
 }
 
 function sanitizeEpicPayloadData(epicData: unknown): unknown {
@@ -174,13 +170,6 @@ export async function requestAuthRecovery(): Promise<boolean> {
     return true;
 }
 
-async function ensureSyncConsent(accountLabel: string): Promise<void> {
-    const isConfirmed = await requestUserIdConsentViaPageSwal('Epic', accountLabel);
-    if (!isConfirmed) {
-        throw new Error('Sync canceled: account not confirmed');
-    }
-}
-
 async function acquireAccountSession(configuredUsername: string): Promise<EpicAccountSession> {
     const response = await sendRuntimeMessage<RuntimeMessageResponse>({
         type: 'FETCH_EPIC_TOKEN',
@@ -236,26 +225,6 @@ async function fetchLibraryData(
     return libraryData;
 }
 
-async function sendLibraryData(
-    importUrl: string | null,
-    libraryData: unknown,
-    username: string,
-    accountId: string
-): Promise<void> {
-    if (!importUrl) {
-        console.warn('[gg.deals-extension] No linktoimport URL found for Epic; skipping sending data to server');
-        return;
-    }
-
-    await sendMessageToServer(importUrl, {
-        version: EXTENSION_VERSION,
-        accountId,
-        username,
-        data: libraryData
-    } as unknown as JSON);
-    console.log('[gg.deals-extension] Epic library items sent to server successfully');
-}
-
 async function syncLibraryByImportUrl(
     importUrl: string,
     configuredUsername: string,
@@ -264,65 +233,26 @@ async function syncLibraryByImportUrl(
     configuredAccountId = ''
 ): Promise<SyncedAccount> {
     const { accessToken, accountId, username } = await acquireAccountSession(configuredUsername);
-
-    let didConnectAccount = false;
-    const hasAccountMismatch = Boolean(configuredAccountId && configuredAccountId !== accountId);
-
-    if (hasAccountMismatch) {
-        const accountLabel = username || 'Epic account';
-        await ensureSyncConsent(accountLabel);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await sendMessageToServer(connectUrl, {
-            version: EXTENSION_VERSION,
-            accountId,
-            username,
-            overwrite: true
-        } as unknown as JSON);
-        didConnectAccount = true;
-    } else if (!configuredUsername) {
-        const accountLabel = username || 'Epic account';
-        await ensureSyncConsent(accountLabel);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await sendMessageToServer(connectUrl, {
-            version: EXTENSION_VERSION,
-            accountId,
-            username
-        } as unknown as JSON);
-        didConnectAccount = true;
-    }
+    const accountSync = createAccountSync({
+        serviceName: 'Epic',
+        account: { accountId, username },
+        accountLabel: username || 'Epic account',
+        configuredUsername,
+        configuredAccountId,
+        connectUrl,
+        postData: async (url, payload) => { await sendMessageToServer(url, payload as JSON); }
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
+    await accountSync.connectAccount();
 
     const libraryData = await fetchLibraryData(accessToken, syncTarget);
-
-    try {
-        await sendLibraryData(importUrl, libraryData, username, accountId);
-    } catch (error) {
-        if (didConnectAccount || !configuredUsername || !isEpicAccountMismatchError(error)) {
-            throw error;
-        }
-
-        const accountLabel = username || 'Epic account';
-        await ensureSyncConsent(accountLabel);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await sendMessageToServer(connectUrl, {
-            version: EXTENSION_VERSION,
-            accountId,
-            username,
-            overwrite: true
-        } as unknown as JSON);
-        await sendLibraryData(importUrl, libraryData, username, accountId);
-    }
+    await accountSync.postImportWithAccountMismatchRecovery(importUrl, {
+        version: EXTENSION_VERSION,
+        accountId,
+        username,
+        data: libraryData
+    });
+    console.log('[gg.deals-extension] Epic library items sent to server successfully');
 
     return { username, accountId };
 }

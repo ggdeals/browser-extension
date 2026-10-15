@@ -19,8 +19,10 @@ import PlayStationIntegration, {
     syncWishlistByImportUrl as syncPlayStationWishlistByImportUrl
 } from './integrations/playstation';
 import NintendoIntegration, {
+    isAuthRequiredError as isNintendoAuthRequiredError,
     readConfiguredAccountIdFromElement as readConfiguredNintendoAccountId,
     readConfiguredUsernameFromElement as readConfiguredNintendoUsername,
+    requestAuthRecovery as requestNintendoAuthRecovery,
     syncCollectionByImportUrl as syncNintendoCollectionByImportUrl
 } from './integrations/nintendo';
 import {
@@ -244,6 +246,14 @@ function bindSettingsProviderSyncActions(container: Element): void {
                 await resetSourceStateViaPageSyncWidget(provider);
                 if (provider === PLAYSTATION_SOURCE_ID && isPlayStationAuthRequiredError(error)) {
                     await requestPlayStationAuthRecovery();
+                    stopSyncProgress();
+                    host.classList.remove('syncing');
+                    restoreChildNodes(host, originalChildren);
+                    host.dataset.ggdealsSyncBusy = '0';
+                    return;
+                }
+                if (provider === NINTENDO_SOURCE_ID && isNintendoAuthRequiredError(error)) {
+                    await requestNintendoAuthRecovery();
                     stopSyncProgress();
                     host.classList.remove('syncing');
                     restoreChildNodes(host, originalChildren);

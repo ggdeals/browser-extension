@@ -30,6 +30,27 @@ npm install
 npm run build:all    # builds the extension for Chrome and Firefox in one go
 ```
 
+## Tests
+
+After installing dependencies, run:
+
+```bash
+npm test
+```
+
+This runs `scripts/test-sync-order.mjs` with Node's built-in test runner. No
+extension build or browser session is required. The script transpiles the
+actual TypeScript integration modules and shared account-sync code in memory,
+then runs them in `node:vm` contexts with mocked browser APIs, DOM elements,
+account confirmations and server responses.
+
+The tests cover Steam, Epic, PlayStation and Nintendo: account confirmation
+before library requests when connecting or switching accounts, cancellation,
+account mismatch recovery, import payloads, and selected button and settings
+state transitions. They make no network requests and require no real accounts.
+Background API pagination and visual browser behaviour need separate checks.
+Type checking is performed by `npm run build:all`, separately from these tests.
+
 ## Load the Extension in Chrome (Unpacked)
 
 1. Build the project first:
@@ -70,13 +91,14 @@ Where things live:
 | --- | --- |
 | `src/manifest.json` | The manifest, shared by both targets, and the list of supported sites |
 | `src/bar/` | The price bar - `integrations/` holds one page rule per site |
-| `src/integrations/` | Steam, Epic, and PlayStation sync flows |
+| `src/integrations/` | Steam, Epic, PlayStation, and Nintendo sync flows |
 | `src/settings/` | The popup UI (Preact) |
 | `src/background.ts` | Background script - all provider API calls |
 | `src/content-settings.ts` | Content script for GG.deals pages |
 | `src/utils/` | Shared settings, sync, and i18n helpers |
 | `public/_locales/` | Translations, 14 locales, default `en` |
 | `scripts/build.mjs` | The build itself |
+| `scripts/test-sync-order.mjs` | Sync flow regression tests, run with `npm test` |
 
 Adding a site to the price bar means writing a page rule under
 `src/bar/integrations/`, registering it in that directory's `index.ts`, and

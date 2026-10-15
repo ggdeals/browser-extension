@@ -1,3 +1,4 @@
+import { createAccountSync } from '../../utils/sync-account';
 import {
     EXTENSION_VERSION,
     NINTENDO_SOURCE_ID,
@@ -19,7 +20,6 @@ import {
     readTrimmedAttribute,
     resetSourceStateViaPageSyncWidget,
     restoreSyncElementSnapshot,
-    requestUserIdConsentViaPageSwal,
     sendMessageToServer,
     sendRuntimeMessage,
     snapshotSyncElement,
@@ -66,10 +66,6 @@ function isNintendoEmptyDataError(error: unknown): boolean {
     return errorMessage.includes('Nintendo wishlist data payload is missing in response')
         || errorMessage.includes('Nintendo wishlist is empty')
         || errorMessage.includes('Nintendo collection is empty');
-}
-
-function isNintendoAccountMismatchError(error: unknown): boolean {
-    return toErrorMessage(error).includes('Invalid accountId:');
 }
 
 function isNintendoManualRefreshRequiredError(error: unknown): boolean {
@@ -172,47 +168,6 @@ async function postImportDataWithFallback(url: string, payload: unknown): Promis
     }
 }
 
-async function ensureSyncConsent(accountLabel: string): Promise<void> {
-    const isAccepted = await requestUserIdConsentViaPageSwal('Nintendo', accountLabel);
-    if (!isAccepted) {
-        throw new Error('Sync canceled: account not confirmed');
-    }
-}
-
-async function postImportWithAccountMismatchRecovery(
-    importUrl: string,
-    importPayload: unknown,
-    configuredAccountId: string,
-    configuredUsername: string,
-    didConnectAccount: boolean,
-    accountLabel: string,
-    connectUrl: string | null,
-    accountId: string,
-    username: string
-): Promise<void> {
-    try {
-        await postImportDataWithFallback(importUrl, importPayload);
-    } catch (error) {
-        if (didConnectAccount || (!configuredAccountId && !configuredUsername) || !isNintendoAccountMismatchError(error)) {
-            throw error;
-        }
-
-        await ensureSyncConsent(accountLabel);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await postImportDataWithFallback(connectUrl, {
-            version: EXTENSION_VERSION,
-            accountId,
-            username,
-            overwrite: true
-        });
-        await postImportDataWithFallback(importUrl, importPayload);
-    }
-}
-
 async function fetchAccountData(): Promise<NintendoAccountPayload> {
     const response = await sendRuntimeMessage<RuntimeMessageResponse>({
         type: 'FETCH_NINTENDO_ACCOUNT'
@@ -258,12 +213,12 @@ async function fetchCollectionData(): Promise<NintendoCollectionPayload> {
     return collectionData;
 }
 
-async function acquireAccountInfo(configuredUsername: string): Promise<NintendoAccount> {
+async function acquireAccountInfo(configuredUsername: string, configuredAccountId: string): Promise<NintendoAccount> {
     console.log('[gg.deals-extension] Fetching Nintendo account data before library data');
     const accountData = await fetchAccountData();
     const accountId = typeof accountData.accountId === 'string' ? accountData.accountId.trim() : '';
     const username = typeof accountData.username === 'string' ? accountData.username.trim() : '';
-    const resolvedUsername = username || configuredUsername;
+    const resolvedUsername = username || (configuredAccountId === accountId ? configuredUsername : '');
 
     if (!accountId) {
         throw new Error('Nintendo account ID is missing in account response');
@@ -272,59 +227,37 @@ async function acquireAccountInfo(configuredUsername: string): Promise<NintendoA
     return { accountId, username: resolvedUsername };
 }
 
-async function connectAccountBeforeLibraryFetch(
-    account: NintendoAccount,
-    configuredAccountId: string,
-    configuredUsername: string,
-    connectUrl: string | null
-): Promise<boolean> {
-    const hasAccountMismatch = Boolean(configuredAccountId && configuredAccountId !== account.accountId);
-    const hasMatchingLegacyUsername = !configuredAccountId
-        && Boolean(configuredUsername)
-        && configuredUsername === account.username;
-    if (!hasAccountMismatch && (configuredAccountId || hasMatchingLegacyUsername)) {
-        return false;
-    }
-
-    await ensureSyncConsent(formatNintendoAccountLabel(account));
-
-    if (!connectUrl) {
-        throw new Error('Missing connect URL');
-    }
-
-    await postImportDataWithFallback(connectUrl, {
-        version: EXTENSION_VERSION,
-        accountId: account.accountId,
-        username: account.username,
-        ...(hasAccountMismatch ? { overwrite: true } : {})
-    });
-
-    return true;
-}
-
 export async function syncCollectionByImportUrl(
     importUrl: string,
     configuredUsername: string,
     connectUrl: string | null = null,
     configuredAccountId = ''
 ): Promise<NintendoAccount> {
+    const account = await acquireAccountInfo(configuredUsername, configuredAccountId);
+    const accountSync = createAccountSync({
+        serviceName: 'Nintendo',
+        account,
+        accountLabel: formatNintendoAccountLabel(account),
+        configuredUsername,
+        configuredAccountId,
+        connectUrl,
+        postData: postImportDataWithFallback
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
+    await accountSync.connectAccount();
+
     const collectionData = await fetchCollectionData();
     const accountId = typeof collectionData.accountId === 'string' ? collectionData.accountId.trim() : '';
     const collectionUsername = typeof collectionData.username === 'string' ? collectionData.username.trim() : '';
     if (!accountId) {
         throw new Error('Nintendo collection account ID is missing in response');
     }
-
-    const account: NintendoAccount = {
-        accountId,
-        username: collectionUsername || configuredUsername
-    };
-    const didConnectAccount = await connectAccountBeforeLibraryFetch(
-        account,
-        configuredAccountId,
-        configuredUsername,
-        connectUrl
-    );
+    if (accountId !== account.accountId) {
+        throw new Error('Nintendo account changed during collection sync');
+    }
+    if (collectionUsername && account.username && collectionUsername !== account.username) {
+        throw new Error('Nintendo username changed during collection sync');
+    }
 
     const games = Array.isArray(collectionData.items) ? collectionData.items : [];
     if (games.length === 0) {
@@ -342,17 +275,7 @@ export async function syncCollectionByImportUrl(
             }
         ]
     };
-    await postImportWithAccountMismatchRecovery(
-        targetUrl,
-        importPayload,
-        configuredAccountId,
-        configuredUsername,
-        didConnectAccount,
-        formatNintendoAccountLabel(account),
-        connectUrl,
-        account.accountId,
-        account.username
-    );
+    await accountSync.postImportWithAccountMismatchRecovery(targetUrl, importPayload);
     console.log('[gg.deals-extension] Nintendo collection data sent to server successfully');
     return account;
 }
@@ -363,13 +286,18 @@ export async function syncWishlistByImportUrl(
     connectUrl: string | null = null,
     configuredAccountId = ''
 ): Promise<NintendoAccount> {
-    const account = await acquireAccountInfo(configuredUsername);
-    const didConnectAccount = await connectAccountBeforeLibraryFetch(
+    const account = await acquireAccountInfo(configuredUsername, configuredAccountId);
+    const accountSync = createAccountSync({
+        serviceName: 'Nintendo',
         account,
-        configuredAccountId,
+        accountLabel: formatNintendoAccountLabel(account),
         configuredUsername,
-        connectUrl
-    );
+        configuredAccountId,
+        connectUrl,
+        postData: postImportDataWithFallback
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
+    await accountSync.connectAccount();
 
     const wishlistData = await fetchWishlistData();
     const accountId = typeof wishlistData.accountId === 'string' ? wishlistData.accountId.trim() : '';
@@ -399,17 +327,7 @@ export async function syncWishlistByImportUrl(
         username: account.username,
         data
     };
-    await postImportWithAccountMismatchRecovery(
-        targetUrl,
-        importPayload,
-        configuredAccountId,
-        configuredUsername,
-        didConnectAccount,
-        formatNintendoAccountLabel(account),
-        connectUrl,
-        account.accountId,
-        account.username
-    );
+    await accountSync.postImportWithAccountMismatchRecovery(targetUrl, importPayload);
     console.log('[gg.deals-extension] Nintendo wishlist data sent to server successfully');
     return account;
 }
@@ -519,13 +437,13 @@ function bindSyncButton(element: Element): void {
                 return;
             }
 
-            if (syncTarget !== 'collection' && isNintendoManualRefreshRequiredError(error)) {
+            if (isNintendoManualRefreshRequiredError(error)) {
                 await showWarningToast(NINTENDO_SYNC_ERROR_MESSAGES.manualRefreshRequired);
                 return;
             }
 
-            if (syncTarget !== 'collection' && isAuthRequiredError(error)) {
-                console.warn('[gg.deals-extension] Nintendo wishlist session refresh failed.');
+            if (isAuthRequiredError(error)) {
+                await requestAuthRecovery();
                 return;
             }
 

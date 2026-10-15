@@ -1,3 +1,4 @@
+import { createAccountSync } from '../../utils/sync-account';
 import {
     EXTENSION_VERSION,
     PLAYSTATION_SOURCE_ID,
@@ -21,7 +22,6 @@ import {
     readTrimmedAttribute,
     resetSourceStateViaPageSyncWidget,
     restoreSyncElementSnapshot,
-    requestUserIdConsentViaPageSwal,
     sendMessageToServer,
     sendRuntimeMessage,
     snapshotSyncElement,
@@ -70,10 +70,6 @@ function isPlayStationEmptyDataError(error: unknown): boolean {
     return errorMessage.includes('PlayStation wishlist data payload is missing in response')
         || errorMessage.includes('PlayStation wishlist is empty')
         || errorMessage.includes('PlayStation collection is empty');
-}
-
-function isPlayStationAccountMismatchError(error: unknown): boolean {
-    return toErrorMessage(error).includes('Invalid accountId:');
 }
 
 function isEmptyObject(value: unknown): boolean {
@@ -205,46 +201,6 @@ async function postImportDataWithFallback(url: string, payload: unknown): Promis
     }
 }
 
-async function ensureSyncConsent(accountLabel: string): Promise<void> {
-    const isAccepted = await requestUserIdConsentViaPageSwal('PlayStation', accountLabel);
-    if (!isAccepted) {
-        throw new Error('Sync canceled: account not confirmed');
-    }
-}
-
-async function postImportWithAccountMismatchRecovery(
-    importUrl: string,
-    importPayload: unknown,
-    configuredUsername: string,
-    didConnectAccount: boolean,
-    accountLabel: string,
-    connectUrl: string | null,
-    accountId: string,
-    username: string
-): Promise<void> {
-    try {
-        await postImportDataWithFallback(importUrl, importPayload);
-    } catch (error) {
-        if (didConnectAccount || !configuredUsername || !isPlayStationAccountMismatchError(error)) {
-            throw error;
-        }
-
-        await ensureSyncConsent(accountLabel);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await postImportDataWithFallback(connectUrl, {
-            version: EXTENSION_VERSION,
-            accountId,
-            username,
-            overwrite: true
-        });
-        await postImportDataWithFallback(importUrl, importPayload);
-    }
-}
-
 async function fetchWishlistData(wishlistUrl = PLAYSTATION_WISHLIST_URL): Promise<PlayStationWishlistPayload> {
     const response = await sendRuntimeMessage<RuntimeMessageResponse>({
         type: 'FETCH_PLAYSTATION_WISHLIST',
@@ -307,33 +263,6 @@ async function acquireAccountInfo(
     return { accountId, username };
 }
 
-async function connectAccountBeforeLibraryFetch(
-    account: PlayStationAccount,
-    configuredUsername: string,
-    configuredAccountId: string,
-    connectUrl: string | null
-): Promise<boolean> {
-    const hasAccountMismatch = Boolean(configuredAccountId && configuredAccountId !== account.accountId);
-    if (!hasAccountMismatch && configuredUsername) {
-        return false;
-    }
-
-    await ensureSyncConsent(`${account.username} (ID: ${account.accountId})`);
-
-    if (!connectUrl) {
-        throw new Error('Missing connect URL');
-    }
-
-    await postImportDataWithFallback(connectUrl, {
-        version: EXTENSION_VERSION,
-        accountId: account.accountId,
-        username: account.username,
-        ...(hasAccountMismatch ? { overwrite: true } : {})
-    });
-
-    return true;
-}
-
 export async function syncCollectionByImportUrl(
     importUrl: string,
     configuredUsername: string,
@@ -342,12 +271,17 @@ export async function syncCollectionByImportUrl(
     configuredAccountId = ''
 ): Promise<PlayStationAccount> {
     const account = await acquireAccountInfo(collectionUrl, configuredUsername);
-    const didConnectAccount = await connectAccountBeforeLibraryFetch(
+    const accountSync = createAccountSync({
+        serviceName: 'PlayStation',
         account,
+        accountLabel: `${account.username} (ID: ${account.accountId})`,
         configuredUsername,
         configuredAccountId,
-        connectUrl
-    );
+        connectUrl,
+        postData: postImportDataWithFallback
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
+    await accountSync.connectAccount();
 
     const collectionData = await fetchCollectionData(collectionUrl);
     const accountId = typeof collectionData.accountId === 'string' ? collectionData.accountId.trim() : '';
@@ -377,16 +311,7 @@ export async function syncCollectionByImportUrl(
             }
         ]
     };
-    await postImportWithAccountMismatchRecovery(
-        targetUrl,
-        importPayload,
-        configuredUsername,
-        didConnectAccount,
-        `${account.username} (ID: ${account.accountId})`,
-        connectUrl,
-        account.accountId,
-        account.username
-    );
+    await accountSync.postImportWithAccountMismatchRecovery(targetUrl, importPayload);
     console.log('[gg.deals-extension] PlayStation collection data sent to server successfully');
     return account;
 }
@@ -399,12 +324,17 @@ export async function syncWishlistByImportUrl(
     configuredAccountId = ''
 ): Promise<PlayStationAccount> {
     const account = await acquireAccountInfo(wishlistUrl, configuredUsername);
-    const didConnectAccount = await connectAccountBeforeLibraryFetch(
+    const accountSync = createAccountSync({
+        serviceName: 'PlayStation',
         account,
+        accountLabel: `${account.username} (ID: ${account.accountId})`,
         configuredUsername,
         configuredAccountId,
-        connectUrl
-    );
+        connectUrl,
+        postData: postImportDataWithFallback
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
+    await accountSync.connectAccount();
 
     const wishlistData = await fetchWishlistData(wishlistUrl);
     const accountId = typeof wishlistData.accountId === 'string' ? wishlistData.accountId.trim() : '';
@@ -433,16 +363,7 @@ export async function syncWishlistByImportUrl(
         username: account.username,
         data
     };
-    await postImportWithAccountMismatchRecovery(
-        targetUrl,
-        importPayload,
-        configuredUsername,
-        didConnectAccount,
-        `${account.username} (ID: ${account.accountId})`,
-        connectUrl,
-        account.accountId,
-        account.username
-    );
+    await accountSync.postImportWithAccountMismatchRecovery(targetUrl, importPayload);
     console.log('[gg.deals-extension] PlayStation wishlist data sent to server successfully');
     return account;
 }

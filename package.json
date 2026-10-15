@@ -10,6 +10,7 @@
   },
   "type": "module",
   "scripts": {
+    "test": "node --test scripts/test-sync-order.mjs",
     "dev": "npm run watch:bar-css & npm run watch:settings-css & vite",
     "build:bar-css": "lessc src/bar/styles/bar.less src/bar/styles/bar.css",
     "watch:bar-css": "lessc --watch src/bar/styles/bar.less src/bar/styles/bar.css",

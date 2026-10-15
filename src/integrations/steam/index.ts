@@ -1,3 +1,4 @@
+import { createAccountSync } from '../../utils/sync-account';
 import {
     EXTENSION_VERSION,
     STEAM_COLLECTION_SYNC_BUTTON_ID,
@@ -22,7 +23,6 @@ import {
     readServerErrorCode,
     resetSourceStateViaPageSyncWidget,
     restoreSyncElementSnapshot,
-    requestUserIdConsentViaPageSwal,
     sendMessageToServer,
     snapshotSyncElement,
     toErrorMessage,
@@ -179,13 +179,6 @@ async function acquireAccountInfo(configuredUsername: string): Promise<SteamAcco
     }
 }
 
-async function ensureSyncConsent(accountLabel: string): Promise<void> {
-    const isConfirmed = await requestUserIdConsentViaPageSwal('Steam', accountLabel);
-    if (!isConfirmed) {
-        throw new Error('Sync canceled: account not confirmed');
-    }
-}
-
 async function fetchLibraryData(): Promise<unknown> {
     const response = await browser.runtime.sendMessage({ type: 'FETCH_STEAM_USERDATA' }) as RuntimeMessageResponse;
     if (!response?.ok) {
@@ -210,51 +203,26 @@ async function syncLibraryByImportUrl(
     connectUrl: string | null = null
 ): Promise<string> {
     const { username, accountId, version } = await acquireAccountInfo(configuredUsername);
+    const accountSync = createAccountSync({
+        serviceName: 'Steam',
+        account: { accountId, username },
+        accountLabel: username,
+        configuredUsername,
+        connectUrl,
+        postData: async (url, payload) => { await sendMessageToServer(url, payload as JSON); }
+    });
+    await accountSync.confirmAccountBeforeLibraryFetch();
 
     const libraryData = await fetchLibraryData();
-
-    if (!configuredUsername) {
-        await ensureSyncConsent(username);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await sendMessageToServer(connectUrl, {
-            data: libraryData,
-            username,
-            accountId,
-            version
-        } as unknown as JSON);
-    }
-
-    const importPayload = {
+    // Steam's connect endpoint also receives library data, so connect after fetching,
+    // but always confirm the account before fetching, just like the other providers.
+    await accountSync.connectAccount(libraryData);
+    await accountSync.postImportWithAccountMismatchRecovery(importUrl, {
         data: libraryData,
         username,
         accountId,
         version
-    } as unknown as JSON;
-
-    try {
-        await sendMessageToServer(importUrl, importPayload);
-    } catch (error) {
-        if (!configuredUsername || !toErrorMessage(error).includes('Invalid accountId:')) {
-            throw error;
-        }
-
-        await ensureSyncConsent(username);
-
-        if (!connectUrl) {
-            throw new Error('Missing connect URL');
-        }
-
-        await sendMessageToServer(connectUrl, {
-            accountId,
-            username,
-            overwrite: true
-        } as unknown as JSON);
-        await sendMessageToServer(importUrl, importPayload);
-    }
+    });
 
     return username;
 }
