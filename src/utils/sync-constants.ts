@@ -19,9 +19,12 @@ export const EPIC_ID_LOGIN_URL: string = 'https://www.epicgames.com/id/login?';
 export const EPIC_SOURCE_ID: number = 128;
 export const EPIC_TOKEN_STORAGE_KEY: string = 'ggdeals.epic.token';
 export const EPIC_TOKEN_EXPIRY_SKEW_MS: number = 60000;
-export const EPIC_STORE_HOME_URL: string = 'https://store.epicgames.com/';
+export const EPIC_STORE_AUTH_HEALTHCHECK_URL: string = 'https://store.epicgames.com/auth-healthcheck';
+export const EPIC_STORE_WISHLIST_PAGE_URL: string = 'https://store.epicgames.com/wishlist';
 export const EPIC_STORE_WISHLIST_URL: string = 'https://store.epicgames.com/graphql';
-export const EPIC_STORE_WARMUP_WAIT_MS: number = 3000;
+export const EPIC_STORE_WARMUP_TIMEOUT_MS: number = 12000;
+export const EPIC_STORE_WARMUP_POLL_INTERVAL_MS: number = 750;
+export const EPIC_WISHLIST_AUTH_REQUIRED: string = 'EPIC_WISHLIST_AUTH_REQUIRED';
 export const EPIC_WISHLIST_PERSISTED_QUERY_HASH: string = '40e7770852757ee6aaa43b0f6fce65de984754e8d32572a1c978910cbf26f02e';
 
 export const PLAYSTATION_WISHLIST_URL: string = 'https://library.playstation.com/wishlist';

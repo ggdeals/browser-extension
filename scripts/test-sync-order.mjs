@@ -22,6 +22,7 @@ const providers = {
 };
 const constants = {
     EXTENSION_VERSION: 'test',
+    EPIC_WISHLIST_AUTH_REQUIRED: 'EPIC_WISHLIST_AUTH_REQUIRED',
     STEAM_SOURCE_ID: 64, EPIC_SOURCE_ID: 128, PLAYSTATION_SOURCE_ID: 256, NINTENDO_SOURCE_ID: 512,
     STEAM_COLLECTION_SYNC_BUTTON_ID: 'steam-collection', STEAM_WISHLIST_BUTTON_ID: 'steam-wishlist', STEAM_IGNORELIST_BUTTON_ID: 'steam-ignorelist',
     EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID: 'epic-collection', EPIC_GAMES_WISHLIST_SYNC_BUTTON_ID: 'epic-wishlist',
@@ -81,6 +82,7 @@ function loadSync(provider, target, options = {}) {
         }
         assert.equal(message.type, providers[provider][target]);
         if (provider === 'epic') assert.equal(message.isWishlist, target === 'wishlist');
+        if (options.libraryError) return { ok: false, error: options.libraryError };
         return { ok: true, data: {
             accountId: libraryAccountId, username: libraryUsername, onlineId: libraryUsername,
             items: ['game'], games: ['game'], apolloState: ['wish'], rgOwnedApps: ['game']
@@ -109,7 +111,8 @@ function loadSync(provider, target, options = {}) {
         persistTrimmedAttribute: (el, name, value) => el.setAttribute(name, value.trim()),
         readTrimmedAttribute: (el, name) => el.getAttribute(name)?.trim() ?? '',
         restoreSyncElementSnapshot: () => {}, snapshotSyncElement: () => null,
-        callSwal: async () => true, showErrorToast: async () => {}, showWarningToast: async () => {}
+        callSwal: async () => { events.push(['login-dialog']); return false; },
+        showErrorToast: async () => { events.push(['error-toast']); }, showWarningToast: async () => {}
     };
     const modules = new Map();
     function load(path) {
@@ -295,4 +298,15 @@ test('Nintendo: configured username is never attached to a different account ID'
     await run('old-player', 'account-2');
     assert.equal(posts[0].payload.username, '');
     assert.equal(posts[0].payload.overwrite, true);
+});
+
+test('Epic: an expired store session shows the login dialog without queuing an import or generic error', async () => {
+    const { click, events, posts } = loadSync('epic', 'wishlist', {
+        configuredUsername: 'player', configuredAccountId: 'account-1',
+        libraryError: 'EPIC_WISHLIST_AUTH_REQUIRED'
+    });
+    await click();
+    assert.deepEqual(events.slice(-2), [['reset'], ['login-dialog']]);
+    assert.equal(events.some(([type]) => type === 'queued' || type === 'error-toast'), false);
+    assert.equal(posts.length, 0);
 });

@@ -4,7 +4,8 @@ import {
     EPIC_SOURCE_ID,
     EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID,
     EPIC_GAMES_WISHLIST_SYNC_BUTTON_ID,
-    EPIC_ID_LOGIN_URL
+    EPIC_ID_LOGIN_URL,
+    EPIC_WISHLIST_AUTH_REQUIRED
 } from '../../utils/sync-constants';
 import { EPIC_SYNC_ERROR_MESSAGES } from '../../utils/sync-error-messages';
 import {
@@ -51,6 +52,8 @@ export type SyncedAccount = {
 type SyncTarget = 'collection' | 'wishlist';
 
 const MESSAGE_TIMEOUT_MS = 20000;
+// Includes store session refresh and a bounded wait for the wishlist page to authenticate.
+const WISHLIST_MESSAGE_TIMEOUT_MS = 45000;
 
 function isEpicCollectionOrWishlistEmpty(data: unknown): boolean {
     if (Array.isArray(data)) {
@@ -127,7 +130,9 @@ function persistAccountOnSyncElements(username: string, accountId: string): void
 }
 
 export function isAuthorizationCodeMissingError(error: unknown): boolean {
-    return toErrorMessage(error).includes('authorizationCode missing in Epic response');
+    const message = toErrorMessage(error);
+    return message.includes('authorizationCode missing in Epic response')
+        || message.includes(EPIC_WISHLIST_AUTH_REQUIRED);
 }
 
 async function openUrlInNewWindow(url: string): Promise<void> {
@@ -208,7 +213,7 @@ async function fetchLibraryData(
         type: 'FETCH_EPIC_LIBRARY_ITEMS',
         accessToken,
         isWishlist
-    }, MESSAGE_TIMEOUT_MS);
+    }, isWishlist ? WISHLIST_MESSAGE_TIMEOUT_MS : MESSAGE_TIMEOUT_MS);
 
     if (!response?.ok) {
         throw new Error(response?.error ?? 'Unknown error while fetching Epic library items');

@@ -3,13 +3,9 @@ import {
   EPIC_LIBRARY_ITEMS_URL,
   EPIC_OAUTH_CLIENT_ID,
   EPIC_OAUTH_CLIENT_SECRET,
-  EPIC_STORE_HOME_URL,
-  EPIC_STORE_WARMUP_WAIT_MS,
-  EPIC_STORE_WISHLIST_URL,
   EPIC_TOKEN_EXPIRY_SKEW_MS,
   EPIC_TOKEN_STORAGE_KEY,
   EPIC_TOKEN_URL,
-  EPIC_WISHLIST_PERSISTED_QUERY_HASH,
   EPIC_SOURCE_ID,
   NINTENDO_GRAPHQL_URL,
   NINTENDO_GRAPHQL_LANGUAGE,
@@ -68,6 +64,7 @@ import {
   POPUP_SETTINGS_SHOW_BLACKLIST_ALERT_STORAGE_KEY,
 } from './settings/constants';
 import browser from "webextension-polyfill";
+import { fetchEpicWishlist } from './integrations/epic/wishlist';
 
 
 type FetchSteamMessage = {
@@ -218,18 +215,6 @@ type EpicLibraryResponse = {
   total?: number;
   count?: number;
   errorMessage?: string;
-};
-
-type EpicWishlistResponse = {
-  errors?: Array<{
-    message?: string;
-    status?: number;
-  }>;
-  data?: {
-    Wishlist?: {
-      wishlistItems?: unknown;
-    };
-  };
 };
 
 type EpicTokenData = Record<string, unknown> & {
@@ -659,81 +644,6 @@ function wait(ms: number): Promise<void> {
   });
 }
 
-function buildEpicWishlistUrl(accountId: string): string {
-  const requestUrl = new URL(EPIC_STORE_WISHLIST_URL);
-  requestUrl.searchParams.set('operationName', 'getWishlist');
-  requestUrl.searchParams.set('variables', JSON.stringify({ accountId }));
-  requestUrl.searchParams.set('extensions', JSON.stringify({
-    persistedQuery: {
-      version: 1,
-      sha256Hash: EPIC_WISHLIST_PERSISTED_QUERY_HASH
-    }
-  }));
-
-  return requestUrl.toString();
-}
-
-function isEpicWishlistNotLoggedIn(payload: EpicWishlistResponse): boolean {
-  if (!Array.isArray(payload?.errors)) {
-    return false;
-  }
-
-  return payload.errors.some((errorItem) => {
-    const message = typeof errorItem?.message === 'string' ? errorItem.message : '';
-    return message.includes('com.epicgames.wishlist.notLoggedIn');
-  });
-}
-
-function getEpicWishlistErrorMessage(payload: EpicWishlistResponse, httpStatus: number): string {
-  const firstError = Array.isArray(payload?.errors) ? payload.errors[0] : undefined;
-  const firstMessage = typeof firstError?.message === 'string' ? firstError.message : '';
-  if (firstMessage.trim().length > 0) {
-    return firstMessage;
-  }
-
-  return `Epic wishlist request failed (HTTP ${httpStatus})`;
-}
-
-async function warmupEpicStoreInBackgroundTab(): Promise<void> {
-  const tab = await browser.tabs.create({ url: EPIC_STORE_HOME_URL, active: false });
-
-  await wait(EPIC_STORE_WARMUP_WAIT_MS);
-
-  if (typeof tab.id === 'number') {
-    try {
-      await browser.tabs.remove(tab.id);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn('[gg.deals-extension][background] Failed to close Epic warmup tab:', errorMessage);
-    }
-  }
-}
-
-async function fetchEpicWishlistGraphQL(accessToken: string, accountId: string): Promise<EpicWishlistResponse> {
-  const wishlistUrl = buildEpicWishlistUrl(accountId);
-  const response = await fetch(wishlistUrl, {
-    method: 'GET',
-    credentials: 'include',
-    headers: {
-      'Accept': 'application/json',
-      'Authorization': `bearer ${accessToken}`
-    }
-  });
-
-  console.log('[gg.deals-extension][background] FETCH_EPIC_WISHLIST status:', response.status);
-
-  const payload = await response.json() as EpicWishlistResponse;
-  if (!response.ok || (Array.isArray(payload.errors) && payload.errors.length > 0)) {
-    if (isEpicWishlistNotLoggedIn(payload)) {
-      throw new Error('EPIC_WISHLIST_NOT_LOGGED_IN');
-    }
-
-    throw new Error(getEpicWishlistErrorMessage(payload, response.status));
-  }
-
-  return payload;
-}
-
 async function fetchEpicWishlistWithRetry(accessToken: string): Promise<unknown> {
   const storedToken = await readStoredEpicToken();
   const accountId = typeof storedToken?.account_id === 'string' ? storedToken.account_id.trim() : '';
@@ -741,30 +651,7 @@ async function fetchEpicWishlistWithRetry(accessToken: string): Promise<unknown>
     throw new Error('Missing account_id in stored Epic token');
   }
 
-  try {
-    const payload = await fetchEpicWishlistGraphQL(accessToken, accountId);
-    return payload?.data?.Wishlist?.wishlistItems ?? payload;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage !== 'EPIC_WISHLIST_NOT_LOGGED_IN') {
-      throw error;
-    }
-
-    console.warn('[gg.deals-extension][background] FETCH_EPIC_WISHLIST not logged in, warming Epic store session and retrying once');
-    await warmupEpicStoreInBackgroundTab();
-
-    try {
-      const retryPayload = await fetchEpicWishlistGraphQL(accessToken, accountId);
-      return retryPayload?.data?.Wishlist?.wishlistItems ?? retryPayload;
-    } catch (retryError) {
-      const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
-      if (retryMessage === 'EPIC_WISHLIST_NOT_LOGGED_IN') {
-        throw new Error('Epic wishlist request failed after warmup retry: not logged in');
-      }
-
-      throw retryError;
-    }
-  }
+  return fetchEpicWishlist(accessToken, accountId);
 }
 
 async function fetchEpicLibraryItemsWithPagination(

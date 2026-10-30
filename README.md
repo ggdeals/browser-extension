@@ -40,7 +40,7 @@ After installing dependencies, run:
 npm test
 ```
 
-This runs `scripts/test-sync-order.mjs` with Node's built-in test runner. No
+This runs `scripts/test-*.mjs` with Node's built-in test runner. No
 extension build or browser session is required. The script transpiles the
 actual TypeScript integration modules and shared account-sync code in memory,
 then runs them in `node:vm` contexts with mocked browser APIs, DOM elements,
@@ -49,7 +49,9 @@ account confirmations and server responses.
 The tests cover Steam, Epic, PlayStation and Nintendo: account confirmation
 before library requests when connecting or switching accounts, cancellation,
 account mismatch recovery, import payloads, and selected button and settings
-state transitions. They make no network requests and require no real accounts.
+state transitions. Epic wishlist tests also cover store session refresh, waiting
+for authenticated data, refresh timeouts and temporary tab cleanup.
+They make no network requests and require no real accounts.
 Background API pagination and visual browser behaviour need separate checks.
 Type checking is performed by `npm run build:all`, separately from these tests.
 
@@ -101,6 +103,7 @@ Where things live:
 | `public/_locales/` | Translations, 14 locales, default `en` |
 | `scripts/build.mjs` | The build itself |
 | `scripts/test-sync-order.mjs` | Sync flow regression tests, run with `npm test` |
+| `scripts/test-epic-wishlist.mjs` | Epic store session recovery regression tests |
 
 Adding a site to the price bar means writing a page rule under
 `src/bar/integrations/`, registering it in that directory's `index.ts`, and
