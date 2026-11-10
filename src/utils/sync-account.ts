@@ -13,6 +13,8 @@ type AccountSyncOptions = {
     configuredUsername: string;
     configuredAccountId?: string;
     connectUrl: string | null;
+    // Some importers bind the confirmed account together with the collection.
+    connectOnImport?: boolean;
     postData: (url: string, payload: unknown) => Promise<void>;
 };
 
@@ -24,6 +26,7 @@ export function createAccountSync({
     configuredUsername,
     configuredAccountId = '',
     connectUrl,
+    connectOnImport = false,
     postData
 }: AccountSyncOptions) {
     const hasConfiguredAccount = Boolean(configuredAccountId || configuredUsername);
@@ -46,7 +49,7 @@ export function createAccountSync({
     async function confirmAccountBeforeLibraryFetch(): Promise<void> {
         if (!hasMatchingAccount) {
             await ensureSyncConsent();
-            if (!connectUrl) {
+            if (!connectUrl && !connectOnImport) {
                 throw new Error('Missing connect URL');
             }
         }
@@ -67,6 +70,9 @@ export function createAccountSync({
     }
 
     async function connectAccount(data?: unknown): Promise<void> {
+        if (connectOnImport) {
+            return;
+        }
         if (!hasMatchingAccount && !didConnectAccount) {
             await ensureSyncConsent();
             await postAccount(data);
@@ -77,7 +83,7 @@ export function createAccountSync({
         try {
             await postData(importUrl, payload);
         } catch (error) {
-            if (didConnectAccount || !hasConfiguredAccount || !toErrorMessage(error).includes('Invalid accountId:')) {
+            if (connectOnImport || didConnectAccount || !hasConfiguredAccount || !toErrorMessage(error).includes('Invalid accountId:')) {
                 throw error;
             }
             await ensureSyncConsent();

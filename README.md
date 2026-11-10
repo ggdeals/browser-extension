@@ -14,13 +14,49 @@ libraries in sync with your GG.deals account. Chrome and Firefox, Manifest V3.
   tab.
 - **Library sync.** Link an account on the GG.deals extension settings page and
   import from Steam (library, wishlist, ignore list), Epic (library),
-  PlayStation (collection, wishlist), or Nintendo (collection, wishlist).
+  PlayStation (collection, wishlist), Nintendo (collection, wishlist), or Xbox
+  (collection).
 - **Popup.** The toolbar icon opens the current page's deals, your sync and
   account options, and the bar's appearance settings.
 
 The extension asks for `storage` and access to all `https://` sites. The broad
 host access is what lets the price bar recognise product pages across the stores
 listed in `src/manifest.json`.
+
+Xbox sync works differently from the other providers. Instead of reusing the
+store's browser session, it signs in to Microsoft once (in a tab opened after the
+user confirms) and keeps the resulting token in the extension's own storage. The
+token is never sent to GG.deals or page scripts and is deleted on disconnect.
+Every collection sync checks the current Xbox link with GG.deals and requests
+`https://www.xbox.com/en-us/home_alt/dark/home` with fresh Xbox.com cookies. Its
+`user.isSignedIn` and `user.userInfo.xuid` identify the active session; the viewed
+profile URL and the anonymous `play.xbox.com` SSR page are not used as identity.
+A matching signed-in session reuses the saved grant without another prompt.
+Signing out stops sync before collection requests, even if the OAuth grant is
+still valid. A readable session with a different XUID uses the shared account
+confirmation and Microsoft authorization flow.
+
+A missing GG.deals link clears the saved token, and a token for a different XUID
+than the current link also requires fresh authorization. If the Xbox.com session
+cannot be read while the grant is usable, the extension keeps the grant and asks
+the user to open Xbox.com before retrying. Reauthorizing Microsoft would not fix
+the unreadable session and could repeat on every click. The extension does not
+import with an unverified cached account. After a fresh Microsoft sign-in needed
+for a missing or invalid grant, that sync may proceed without another Xbox.com
+check. Xbox sync is unavailable in private
+browsing, so private tabs cannot use the normal profile's token.
+
+Concurrent sign-ins share one Microsoft tab and device grant. Each sync has its
+own subscription, so canceling one does not cancel the others. The shared result
+survives a background worker restart. Disconnect cancels all subscriptions and
+deletes the token; starting a connection clears saved tokens while preserving
+an unfinished sign-in already in progress in another tab.
+
+If Microsoft rejects the extension's Origin during a token exchange, the
+background retries that request once with an empty Origin header using its
+existing host access. Browsers that do not support overriding the header report
+the transport error and retain the grant. This requires no technical tabs,
+additional permissions or backend token proxy.
 
 ## Build
 
@@ -52,7 +88,9 @@ account mismatch recovery, import payloads, and selected button and settings
 state transitions. Epic wishlist tests also cover store session refresh, waiting
 for authenticated data, refresh timeouts and temporary tab cleanup.
 They make no network requests and require no real accounts.
-Background API pagination and visual browser behaviour need separate checks.
+Xbox tests additionally cover device authorization, token rotation and isolation,
+worker restarts, concurrent background requests, pagination and complete imports.
+Other providers' background API pagination and visual browser behaviour need separate checks.
 Type checking is performed by `npm run build:all`, separately from these tests.
 
 ## Load the Extension in Chrome (Unpacked)
@@ -95,7 +133,7 @@ Where things live:
 | --- | --- |
 | `src/manifest.json` | The manifest, shared by both targets, and the list of supported sites |
 | `src/bar/` | The price bar - `integrations/` holds one page rule per site |
-| `src/integrations/` | Steam, Epic, PlayStation, and Nintendo sync flows |
+| `src/integrations/` | Steam, Epic, PlayStation, Nintendo, and Xbox sync flows |
 | `src/settings/` | The popup UI (Preact) |
 | `src/background.ts` | Background script - all provider API calls |
 | `src/content-settings.ts` | Content script for GG.deals pages |
@@ -104,6 +142,8 @@ Where things live:
 | `scripts/build.mjs` | The build itself |
 | `scripts/test-sync-order.mjs` | Sync flow regression tests, run with `npm test` |
 | `scripts/test-epic-wishlist.mjs` | Epic store session recovery regression tests |
+| `scripts/test-xbox-sync.mjs` | Xbox authorization, refresh, pagination, and import regression tests |
+| `scripts/test-settings-popup.mjs` | Settings popup refresh and page bridge regression tests |
 
 Adding a site to the price bar means writing a page rule under
 `src/bar/integrations/`, registering it in that directory's `index.ts`, and

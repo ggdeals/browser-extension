@@ -25,6 +25,13 @@ import NintendoIntegration, {
     requestAuthRecovery as requestNintendoAuthRecovery,
     syncCollectionByImportUrl as syncNintendoCollectionByImportUrl
 } from './integrations/nintendo';
+import XboxIntegration, {
+    connectAccountByUrl as connectXboxAccountByUrl,
+    disconnectAccount as disconnectXboxAccount,
+    getSyncErrorMessage as getXboxSyncErrorMessage,
+    readConfiguredAccountIdFromElement as readConfiguredXboxAccountId,
+    readConfiguredUsernameFromElement as readConfiguredXboxUsername
+} from './integrations/xbox';
 import {
     EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID,
     EPIC_GAMES_WISHLIST_SYNC_BUTTON_ID,
@@ -39,15 +46,15 @@ import {
     PLAYSTATION_WISHLIST_SYNC_BUTTON_ID,
     STEAM_COLLECTION_SYNC_BUTTON_ID,
     STEAM_SOURCE_ID,
-    USER_SETTINGS_PAGE_CLASSNAME
+    XBOX_COLLECTION_SYNC_BUTTON_ID,
+    XBOX_SOURCE_ID
 } from './utils/sync-constants';
+import { XBOX_SYNC_ERROR_MESSAGES } from './utils/sync-error-messages';
 import {
     bindSyncPaginationProgressDescription,
     isSyncCanceledError,
-    markSourceNewViaPageSyncWidget,
-    markSourceQueuedViaPageSyncWidget,
-    resetSourceStateViaPageSyncWidget,
-    unmarkAsNewViaPageSyncWidget
+    refreshExtensionSettingsPopupViaPage,
+    showErrorToast
 } from './utils/sync-helpers';
 
 function markExtensionInstalledOnBody(): void {
@@ -98,6 +105,14 @@ function detectProvider(statusElement: Element, connectUrl = ''): number | null 
         return NINTENDO_SOURCE_ID;
     }
 
+    if (
+        label.includes('xbox')
+        || normalizedConnectUrl.includes('/xbox')
+        || statusElement.getAttribute('data-extension-provider') === 'xbox'
+    ) {
+        return XBOX_SOURCE_ID;
+    }
+
     return null;
 }
 
@@ -115,6 +130,8 @@ function markProviderConnectedInSettingsModal(host: HTMLElement, originalChildre
     host.classList.remove('syncing');
     host.classList.add('connected');
     host.dataset.ggdealsSyncBusy = '0';
+    host.removeAttribute('data-connect-url');
+    host.closest('.sync-provider-item, .extension-sync-popup-provider-item')?.classList.add('connected');
 
     restoreChildNodes(host, originalChildren);
     const labelElement = host.querySelector('.sync-provider-label, .sync-provider-status-label, .extension-sync-popup-provider-status-label');
@@ -124,6 +141,67 @@ function markProviderConnectedInSettingsModal(host: HTMLElement, originalChildre
     }
 
     host.textContent = 'Connected';
+}
+
+function updateSettingsConnectionCounter(container: Element): void {
+    const counter = document.querySelector('#ggdeals-sync-btn .active-label');
+    const rows = Array.from(container.querySelectorAll('.sync-provider-item, .extension-sync-popup-provider-item'));
+    if (counter && rows.length > 0) {
+        counter.textContent = `${rows.filter((row) => row.classList.contains('connected')).length}/${rows.length}`;
+    }
+}
+
+function bindSettingsProviderDisconnectActions(container: Element): void {
+    const host = container as HTMLElement;
+    if (host.dataset.ggdealsDisconnectBound === '1') {
+        return;
+    }
+    host.dataset.ggdealsDisconnectBound = '1';
+    const pending = new WeakSet<HTMLElement>();
+    const replaying = new WeakSet<HTMLElement>();
+
+    host.addEventListener('click', async (event: MouseEvent) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const link = target?.closest<HTMLElement>('.sync-provider-disconnect');
+        if (!link || !host.contains(link) || replaying.has(link)
+            || detectProvider(link, link.getAttribute('href') ?? '') !== XBOX_SOURCE_ID) {
+            return;
+        }
+
+        // Hold the site's submit handler until the extension transaction commits.
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (pending.has(link)) {
+            return;
+        }
+        pending.add(link);
+        const originalAriaDisabled = link.getAttribute('aria-disabled');
+        const restoreLinkState = (): void => {
+            if (originalAriaDisabled === null) {
+                link.removeAttribute('aria-disabled');
+            } else {
+                link.setAttribute('aria-disabled', originalAriaDisabled);
+            }
+        };
+        link.setAttribute('aria-disabled', 'true');
+        try {
+            await disconnectXboxAccount();
+            restoreLinkState();
+            // Reuse the site's existing POST/CSRF/UI handling exactly once.
+            replaying.add(link);
+            try {
+                link.click();
+            } finally {
+                replaying.delete(link);
+            }
+        } catch {
+            await showErrorToast(XBOX_SYNC_ERROR_MESSAGES.disconnect);
+        } finally {
+            pending.delete(link);
+            restoreLinkState();
+        }
+    }, { capture: true });
 }
 
 function bindSettingsProviderSyncActions(container: Element): void {
@@ -163,6 +241,13 @@ function bindSettingsProviderSyncActions(container: Element): void {
                 return;
             }
 
+            // Xbox uses a grant stored in the extension, so a script on the page
+            // must not be able to start a connection with a synthetic click.
+            if (provider === XBOX_SOURCE_ID && !event.isTrusted) {
+                console.warn('[gg.deals-extension] Ignored a synthetic Xbox Connect click');
+                return;
+            }
+
             console.log('[gg.deals-extension] Settings popup provider detected:', provider, 'connectUrl:', connectUrl);
 
             host.dataset.ggdealsSyncBusy = '1';
@@ -170,10 +255,6 @@ function bindSettingsProviderSyncActions(container: Element): void {
             const originalChildren = snapshotChildNodes(host);
             host.textContent = 'Connecting...';
             const stopSyncProgress = bindSyncPaginationProgressDescription(host, provider);
-            if (provider !== EPIC_SOURCE_ID) {
-                await markSourceNewViaPageSyncWidget(provider);
-            }
-
             try {
                 if (provider === STEAM_SOURCE_ID) {
                     const configuredUsername = readConfiguredSteamUsername(host);
@@ -212,16 +293,28 @@ function bindSettingsProviderSyncActions(container: Element): void {
                     );
                     host.setAttribute('data-username', syncedAccount.username);
                     host.setAttribute('data-account-id', syncedAccount.accountId);
+                } else if (provider === XBOX_SOURCE_ID) {
+                    const syncedAccount = await connectXboxAccountByUrl(
+                        connectUrl,
+                        readConfiguredXboxUsername(host),
+                        readConfiguredXboxAccountId(host)
+                    );
+                    host.setAttribute('data-username', syncedAccount.username);
+                    host.setAttribute('data-account-id', syncedAccount.accountId);
                 }
 
-                await markSourceQueuedViaPageSyncWidget(provider);
                 stopSyncProgress();
                 markProviderConnectedInSettingsModal(host, originalChildren);
+                updateSettingsConnectionCounter(container);
+                try {
+                    // Load the connected badge, Disconnect link and handlers from the website itself.
+                    await refreshExtensionSettingsPopupViaPage();
+                } catch (error) {
+                    // The account is already saved. A display failure must not offer another Connect.
+                    console.warn('[gg.deals-extension] Account connected, but settings popup refresh failed:', error);
+                }
             } catch (error) {
                 if (isSyncCanceledError(error)) {
-                    if (provider !== EPIC_SOURCE_ID) {
-                        await unmarkAsNewViaPageSyncWidget(provider);
-                    }
                     stopSyncProgress();
                     host.classList.remove('syncing');
                     restoreChildNodes(host, originalChildren);
@@ -230,6 +323,14 @@ function bindSettingsProviderSyncActions(container: Element): void {
                 }
 
                 const errorMessage = error instanceof Error ? error.message : String(error);
+                if (provider === XBOX_SOURCE_ID) {
+                    stopSyncProgress();
+                    host.classList.remove('syncing');
+                    restoreChildNodes(host, originalChildren);
+                    host.dataset.ggdealsSyncBusy = '0';
+                    await showErrorToast(getXboxSyncErrorMessage(error));
+                    return;
+                }
                 if (provider === EPIC_SOURCE_ID && isEpicAuthorizationCodeMissingError(error)) {
                     const didOpenEpicLogin = await requestEpicAuthRecovery();
                     stopSyncProgress();
@@ -243,7 +344,6 @@ function bindSettingsProviderSyncActions(container: Element): void {
                     return;
                 }
 
-                await resetSourceStateViaPageSyncWidget(provider);
                 if (provider === PLAYSTATION_SOURCE_ID && isPlayStationAuthRequiredError(error)) {
                     await requestPlayStationAuthRecovery();
                     stopSyncProgress();
@@ -286,20 +386,16 @@ function applyInstalledState(container: Element): void {
 }
 
 function initializeExtensionSettings(body: HTMLElement): void {
-    if (!body.classList.contains(USER_SETTINGS_PAGE_CLASSNAME)) {
-        return;
-    }
-
-    console.log('[gg.deals-extension] Settings page detected, marking extension as installed');
-
+    // The same settings popup can open from collection and other GG.deals pages.
     const processNode = (node: ParentNode): void => {
         const settingsContainer = node instanceof Element && node.id === 'user-extension-settings'
             ? node
             : node.querySelector?.('#user-extension-settings') ?? null;
 
-
         if (settingsContainer) {
             applyInstalledState(settingsContainer);
+            updateSettingsConnectionCounter(settingsContainer);
+            bindSettingsProviderDisconnectActions(settingsContainer);
             bindSettingsProviderSyncActions(settingsContainer);
         }
     };
@@ -334,6 +430,7 @@ function initPageSpecificIntegrations(): void {
         EpicIntegration([EPIC_GAMES_COLLECTION_SYNC_BUTTON_ID]);
         PlayStationIntegration([PLAYSTATION_COLLECTION_SYNC_BUTTON_ID]);
         NintendoIntegration([NINTENDO_COLLECTION_SYNC_BUTTON_ID]);
+        XboxIntegration([XBOX_COLLECTION_SYNC_BUTTON_ID]);
         return;
     }
 

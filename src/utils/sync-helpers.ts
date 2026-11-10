@@ -129,6 +129,8 @@ const SYNC_WIDGET_REQUEST_TYPE = 'GGDEALS_SYNC_WIDGET_REQUEST';
 const SYNC_WIDGET_RESULT_TYPE = 'GGDEALS_SYNC_WIDGET_RESULT';
 const CSRF_POST_JSON_REQUEST_TYPE = 'GGDEALS_CSRF_POST_JSON_REQUEST';
 const CSRF_POST_JSON_RESULT_TYPE = 'GGDEALS_CSRF_POST_JSON_RESULT';
+const REFRESH_EXTENSION_SETTINGS_REQUEST_TYPE = 'GGDEALS_REFRESH_EXTENSION_SETTINGS_REQUEST';
+const REFRESH_EXTENSION_SETTINGS_RESULT_TYPE = 'GGDEALS_REFRESH_EXTENSION_SETTINGS_RESULT';
 export const SYNC_PAGINATION_PROGRESS_MESSAGE = 'GGDEALS_SYNC_PAGINATION_PROGRESS';
 
 type RpcResultPayload = {
@@ -146,7 +148,7 @@ type SendRequestInput = {
   requestType: string;
   resultType: string;
   payload: Record<string, unknown>;
-  timeoutMs: number;
+  timeoutMs: number | null;
 };
 
 type ServerErrorWithCode = Error & {
@@ -266,8 +268,9 @@ function sendRequest(input: SendRequestInput): Promise<RpcResultPayload | null> 
         return;
       }
       settled = true;
-      window.clearTimeout(timeoutId);
+      if (typeof timeoutId !== 'undefined') window.clearTimeout(timeoutId);
       window.removeEventListener('message', onResult);
+      window.removeEventListener('pagehide', onPageHide);
       resolve(value);
     };
 
@@ -284,7 +287,8 @@ function sendRequest(input: SendRequestInput): Promise<RpcResultPayload | null> 
       finish(data);
     };
 
-    const timeoutId = window.setTimeout(() => {
+    const onPageHide = (): void => finish(null);
+    const timeoutId = input.timeoutMs === null ? undefined : window.setTimeout(() => {
       finish(null);
     }, input.timeoutMs);
 
@@ -294,6 +298,7 @@ function sendRequest(input: SendRequestInput): Promise<RpcResultPayload | null> 
     }
 
     window.addEventListener('message', onResult);
+    if (input.timeoutMs === null) window.addEventListener('pagehide', onPageHide, { once: true });
     window.postMessage({
       type: input.requestType,
       requestId,
@@ -305,6 +310,7 @@ function sendRequest(input: SendRequestInput): Promise<RpcResultPayload | null> 
 type CallSwalInput = {
   html: string;
   confirmButtonText?: string;
+  confirmButtonClass?: string;
 };
 
 export async function callSwal(input: CallSwalInput): Promise<boolean> {
@@ -313,9 +319,12 @@ export async function callSwal(input: CallSwalInput): Promise<boolean> {
     resultType: SWAL_RESULT_TYPE,
     payload: {
       html: input.html,
-      confirmButtonText: input.confirmButtonText ?? 'Continue'
+      confirmButtonText: input.confirmButtonText ?? 'Continue',
+      confirmButtonClass: input.confirmButtonClass ?? 'btn btn-blue'
     },
-    timeoutMs: 20000
+    // A visible confirmation waits for the user's decision, not a request timer.
+    // Leaving the page cancels the pending prompt and removes its listener.
+    timeoutMs: null
   });
 
   return Boolean(result?.confirmed);
@@ -329,7 +338,17 @@ export function requestUserIdConsentViaPageSwal(serviceName: string, userId: str
 
 export function isSyncCanceledError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('canceled: account not confirmed');
+  return message.includes('Sync canceled:');
+}
+
+export async function refreshExtensionSettingsPopupViaPage(): Promise<void> {
+  const result = await sendRequest({
+    requestType: REFRESH_EXTENSION_SETTINGS_REQUEST_TYPE,
+    resultType: REFRESH_EXTENSION_SETTINGS_RESULT_TYPE,
+    payload: {},
+    timeoutMs: 5000
+  });
+  if (!result?.ok) throw new Error(result?.error ?? 'Settings popup refresh timed out');
 }
 
 type SyncWidgetAction = 'markSourceNew' | 'markSourceQueued' | 'resetSourceState' | 'unmarkAsNew';

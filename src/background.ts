@@ -30,7 +30,8 @@ import {
   PLAYSTATION_COLLECTION_URL,
   PLAYSTATION_SOURCE_ID,
   PLAYSTATION_WISHLIST_URL,
-  STEAM_URL
+  STEAM_URL,
+  XBOX_SOURCE_ID
 } from './utils/sync-constants';
 import {
   restoreOriginalIcon,
@@ -65,6 +66,7 @@ import {
 } from './settings/constants';
 import browser from "webextension-polyfill";
 import { fetchEpicWishlist } from './integrations/epic/wishlist';
+import { handleXboxMessage, isXboxMessage } from './integrations/xbox/background';
 
 
 type FetchSteamMessage = {
@@ -2239,7 +2241,19 @@ async function getNintendoCollectionBootstrap(): Promise<NintendoCollectionBoots
   }
 }
 
-browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { tab?: { id?: number } }): Promise<RuntimeMessageResponse | void> => {
+browser.runtime.onMessage.addListener(async (rawMessage: unknown, sender: { url?: string; tab?: { id?: number; url?: string; incognito?: boolean } }): Promise<RuntimeMessageResponse | void> => {
+  if (rawMessage && typeof rawMessage === 'object' && isXboxMessage(rawMessage as { type?: string })) {
+    return handleXboxMessage(
+      rawMessage as Parameters<typeof handleXboxMessage>[0],
+      sender.url ?? sender.tab?.url,
+      (currentPage, totalPages) => sendPaginationProgressToTab(sender.tab?.id, {
+        sourceId: XBOX_SOURCE_ID,
+        currentPage,
+        totalPages
+      }),
+      sender.tab?.incognito === true
+    );
+  }
   const message = rawMessage as BackgroundMessage;
   console.log('[gg.deals-extension][background] message received:', message?.type);
 

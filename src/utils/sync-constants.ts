@@ -58,6 +58,13 @@ export const NINTENDO_COLLECTION_OPERATION: string = 'getVgcsVgcs';
 export const NINTENDO_COLLECTION_PAGE_SIZE: number = 300;
 export const NINTENDO_SHOP_ID: number = 3;
 
+export const XBOX_COLLECTION_SYNC_BUTTON_ID: string = 'xbox-collection-sync-btn';
+// Unlike the other extension providers, which have their own sources, Xbox reuses
+// the site's existing Xbox collection source, so earlier Xbox items keep their source.
+export const XBOX_SOURCE_ID: number = 32;
+export const XBOX_COLLECTION_TIMEOUT_MS: number = 600000;
+export const XBOX_SIGNIN_URL: string = 'https://www.xbox.com/';
+
 export const EXTENSION_INSTALLED_CLASSNAME: string = 'extension-installed';
 export const EXTENSION_VERSION: string = chrome.runtime.getManifest().version;
 export const USER_SETTINGS_PAGE_CLASSNAME: string = 'user-settings-page';

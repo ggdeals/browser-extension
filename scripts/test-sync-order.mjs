@@ -43,6 +43,7 @@ class FakeElement {
     }
     getAttribute(name) { return this.attributes[name] ?? null; }
     setAttribute(name, value) { this.attributes[name] = value; }
+    removeAttribute(name) { delete this.attributes[name]; }
     matches() { return false; }
     closest() { return null; }
     querySelector() { return null; }
@@ -67,7 +68,7 @@ function loadSync(provider, target, options = {}) {
     if (options.settings) body.classList.add('user-settings-page');
     const document = {
         body, documentElement: new FakeElement(),
-        querySelector: () => settings,
+        querySelector: (selector) => selector === '#ggdeals-sync-btn .active-label' ? null : settings,
         getElementById: (id) => id === element.id ? element : null
     };
     const sendRuntimeMessage = async (message) => {
@@ -112,7 +113,8 @@ function loadSync(provider, target, options = {}) {
         readTrimmedAttribute: (el, name) => el.getAttribute(name)?.trim() ?? '',
         restoreSyncElementSnapshot: () => {}, snapshotSyncElement: () => null,
         callSwal: async () => { events.push(['login-dialog']); return false; },
-        showErrorToast: async () => { events.push(['error-toast']); }, showWarningToast: async () => {}
+        showErrorToast: async () => { events.push(['error-toast']); }, showWarningToast: async () => {},
+        refreshExtensionSettingsPopupViaPage: async () => { events.push(['refresh-settings']); }
     };
     const modules = new Map();
     function load(path) {
@@ -266,18 +268,17 @@ for (const [provider, targets] of Object.entries(providers)) {
         const target = provider === 'playstation' ? 'wishlist' : 'collection';
         const { click, events, element } = loadSync(provider, target, { confirmed: false, settings: true });
         await click();
-        assert.deepEqual(events, provider === 'epic'
-            ? [['fetch', targets.account], ['confirm']]
-            : [['sync-start'], ['fetch', targets.account], ['confirm'], ['unmark']]);
+        assert.deepEqual(events, [['fetch', targets.account], ['confirm']]);
         assert.equal(element.dataset.ggdealsSyncBusy, '0');
         assert.equal(element.classList.contains('syncing'), false);
     });
-    test(`${provider}: settings queue after importing and mark the account connected`, async () => {
+    test(`${provider}: settings connect through the supplied URL without changing collection queue state`, async () => {
         const target = provider === 'playstation' ? 'wishlist' : 'collection';
         const { click, events, posts, element } = loadSync(provider, target, { settings: true });
         await click();
-        // Settings use the connect URL for both the account POST and the data import.
-        assert.deepEqual(events.slice(-2), [['connect'], ['queued']]);
+        // Existing providers post account/library data to the supplied connect URL.
+        assert.deepEqual(events.slice(-2), [['connect'], ['refresh-settings']]);
+        assert.equal(events.some(([type]) => ['sync-start', 'queued', 'reset', 'unmark'].includes(type)), false);
         assert.equal(posts.length, 2);
         assert.ok(posts[1].payload.data);
         assert.equal(element.dataset.ggdealsSyncBusy, '0');
