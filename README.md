@@ -27,7 +27,7 @@ Xbox sync works differently from the other providers. Instead of reusing the
 store's browser session, it signs in to Microsoft once (in a tab opened after the
 user confirms) and keeps the resulting token in the extension's own storage. The
 token is never sent to GG.deals or page scripts and is deleted on disconnect.
-Every collection sync checks the current Xbox link with GG.deals and requests
+Every collection sync uses the account metadata rendered by GG.deals and requests
 `https://www.xbox.com/en-us/home_alt/dark/home` with fresh Xbox.com cookies. Its
 `user.isSignedIn` and `user.userInfo.xuid` identify the active session; the viewed
 profile URL and the anonymous `play.xbox.com` SSR page are not used as identity.
@@ -36,8 +36,13 @@ Signing out stops sync before collection requests, even if the OAuth grant is
 still valid. A readable session with a different XUID uses the shared account
 confirmation and Microsoft authorization flow.
 
-A missing GG.deals link clears the saved token, and a token for a different XUID
-than the current link also requires fresh authorization. If the Xbox.com session
+A token for a different XUID than the configured account requires fresh
+authorization. Account confirmation, connection and recovery from the server's
+`Invalid accountId:` response use the same helper as the other integrations:
+after consent, the extension reconnects and retries the completed import once.
+There is no separate connection-status request or automatic token reset on an
+import error. Explicit Connect and Disconnect still clear the saved token.
+If the Xbox.com session
 cannot be read while the grant is usable, the extension keeps the grant and asks
 the user to open Xbox.com before retrying. Reauthorizing Microsoft would not fix
 the unreadable session and could repeat on every click. The extension does not

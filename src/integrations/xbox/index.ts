@@ -33,13 +33,8 @@ import {
 import type { XboxAccount, XboxCollectionPage, XboxItem, XboxPendingAuthorization } from './client';
 import type { XboxBackgroundMessage } from './background';
 
-type SyncOptions = { signal?: AbortSignal; onProgress?: (page: number) => void; connectionStatusUrl?: string };
+type SyncOptions = { signal?: AbortSignal; onProgress?: (page: number) => void };
 const MESSAGE_TIMEOUT_MS = 70000;
-const CONNECTION_DISCONNECTED_CODE = 5;
-
-function isConnectionDisconnected(error: unknown): boolean {
-    return String(readServerErrorCode(error)) === String(CONNECTION_DISCONNECTED_CODE);
-}
 
 async function request<T>(message: XboxBackgroundMessage): Promise<T> {
     let response: RuntimeMessageResponse;
@@ -201,10 +196,6 @@ async function postData(url: string, payload: unknown): Promise<void> {
     } catch (error) {
         const serverCode = String(readServerErrorCode(error));
         console.warn(`[gg.deals-extension] Xbox SERVER_POST failed: ${/^\d+$/.test(serverCode) ? `CODE_${serverCode}` : 'SERVER_ERROR'}`);
-        // Handle revocation separately from the shared account-mismatch retry.
-        if (isConnectionDisconnected(error)) {
-            throw Object.assign(new Error('XBOX_CONNECTION_DISCONNECTED'), { serverCode: CONNECTION_DISCONNECTED_CODE });
-        }
         throw error;
     }
 }
@@ -256,65 +247,14 @@ export async function connectAccountByUrl(
 ): Promise<XboxAccount> {
     checkCanceled(options.signal);
     const targetUrl = resolveServerUrl(connectUrl);
-    // An explicit Connect uses the same clean authorization state as a
-    // collection sync that discovers a disconnected server link.
+    // An explicit Connect starts a fresh authorization without canceling a
+    // sign-in already shared by another tab.
     await disconnectAccount(true);
     const { account } = await acquireAccountSync(configuredUsername, configuredAccountId, targetUrl, options);
     return account;
 }
 
 export async function syncCollectionByImportUrl(
-    importUrl: string,
-    configuredUsername: string,
-    connectUrl: string | null = null,
-    configuredAccountId = '',
-    options: SyncOptions = {}
-): Promise<XboxAccount> {
-    checkCanceled(options.signal);
-    const targetUrl = resolveServerUrl(importUrl);
-    if (!options.connectionStatusUrl) throw new Error('Missing Xbox connection status URL. Reload the page and try again.');
-    const statusUrl = resolveServerUrl(options.connectionStatusUrl);
-    let wasDisconnected = false;
-    try {
-        const response = await sendMessageToServer(statusUrl, {} as JSON).catch(error => {
-            console.warn('[gg.deals-extension] Xbox CONNECTION_STATUS failed: SERVER_REQUEST_FAILED');
-            throw error;
-        }) as {
-            success?: boolean;
-            data?: { connected?: boolean; accountId?: string | null; username?: string | null };
-        } | null;
-        checkCanceled(options.signal);
-        const status = response?.data;
-        if (response?.success !== true || typeof status?.connected !== 'boolean'
-            || (status.connected && (typeof status.accountId !== 'string' || !/^\d+$/.test(status.accountId)
-                || (status.username !== null && typeof status.username !== 'string')))) {
-            console.warn('[gg.deals-extension] Xbox CONNECTION_STATUS failed: INVALID_CONNECTION_STATUS');
-            throw new Error('Invalid Xbox connection status');
-        }
-        wasDisconnected = !status.connected && Boolean(configuredAccountId || configuredUsername);
-        if (!status.connected) await disconnectAccount(true);
-        if (wasDisconnected && !connectUrl) throw new Error('Missing connect URL');
-        try {
-            return await syncCollection(targetUrl, status.connected ? status.username ?? '' : '', connectUrl,
-                status.connected ? status.accountId ?? '' : '', options);
-        } catch (error) {
-            if (!isConnectionDisconnected(error) || !connectUrl) throw error;
-            // Revocation during pagination invalidates the local grant too.
-            // Authorize and fetch afresh: the user may choose another account.
-            wasDisconnected = true;
-            await disconnectAccount(true);
-            return await syncCollection(targetUrl, '', connectUrl, '', options);
-        }
-    } catch (error) {
-        if (wasDisconnected && isSyncCanceledError(error)) {
-            error = Object.assign(new Error(toErrorMessage(error)), { serverCode: CONNECTION_DISCONNECTED_CODE });
-        }
-        if (isConnectionDisconnected(error)) await disconnectAccount(true);
-        throw error;
-    }
-}
-
-async function syncCollection(
     importUrl: string,
     configuredUsername: string,
     connectUrl: string | null = null,
@@ -390,8 +330,7 @@ function bindSyncButton(element: Element): void {
             await markSourceNewViaPageSyncWidget(XBOX_SOURCE_ID);
             const account = await syncCollectionByImportUrl(importUrl, readConfiguredUsernameFromElement(host),
                 host.getAttribute('data-connect-url'), readConfiguredAccountIdFromElement(host), {
-                    signal: controller.signal,
-                    connectionStatusUrl: host.getAttribute('data-connection-status-url') ?? undefined
+                    signal: controller.signal
                 });
             await markSourceQueuedViaPageSyncWidget(XBOX_SOURCE_ID);
             persistTrimmedAttribute(host, 'data-account-id', account.accountId);
@@ -401,13 +340,6 @@ function bindSyncButton(element: Element): void {
             else await resetSourceStateViaPageSyncWidget(XBOX_SOURCE_ID);
             stopSyncProgress();
             restoreSyncElementSnapshot(host, initialState);
-            if (isConnectionDisconnected(error)) {
-                host.removeAttribute('data-account-id');
-                host.removeAttribute('data-username');
-                host.classList.remove('connected');
-                const actionLabel = host.querySelector('.action-bottom-text');
-                if (actionLabel) actionLabel.textContent = 'Connect';
-            }
             if (!isSyncCanceledError(error)) {
                 const message = toErrorMessage(error);
                 if (message.includes('Extension context invalidated')) return;

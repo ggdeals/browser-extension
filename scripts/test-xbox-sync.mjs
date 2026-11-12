@@ -842,9 +842,7 @@ function contentFixture(options = {}) {
     const events = [];
     const prompts = [];
     const consentPrompts = [];
-    const statusRequests = [];
     const openedUrls = [];
-    let connection;
     let page = 0;
     let now = initialTime;
     let importAttempts = 0;
@@ -860,11 +858,6 @@ function contentFixture(options = {}) {
             return options.consent !== false;
         },
         sendMessageToServer: async (url, payload) => {
-            if (url.endsWith('/xboxConnection/')) {
-                statusRequests.push({ url, payload: clone(payload) });
-                if (options.statusError) throw options.statusError;
-                return options.statusResponse ?? { success: true, data: connection };
-            }
             events.push({ url, payload: clone(payload) });
             if (url.endsWith('/connect') && options.connectError) throw new Error(options.connectError);
             if (!url.endsWith('/connect') && (importAttempts++ === 0 || options.repeatImportError) && options.importError) {
@@ -909,18 +902,15 @@ function contentFixture(options = {}) {
             dependency.endsWith('sync-constants') ? constants : helpers);
         throw new Error(`Unexpected import ${name}`);
     }, { window: { location }, Date: { now: () => now }, setTimeout: (callback) => setTimeout(callback, 0) });
-    return { events, prompts, consentPrompts, statusRequests, openedUrls,
-        run: (name = '', id = '', connectUrl = null, syncOptions = {}) => {
-            connection = options.connection ?? { connected: true, accountId: id || '999', username: name || 'Configured player' };
-            return sync.syncCollectionByImportUrl('/extensionImport/xboxCollection/', name, connectUrl, id,
-                { connectionStatusUrl: '/extensionImport/xboxConnection/', ...syncOptions });
-        },
+    return { events, prompts, consentPrompts, openedUrls,
+        run: (name = '', id = '', connectUrl = null, syncOptions = {}) =>
+            sync.syncCollectionByImportUrl(options.importUrl ?? '/extensionImport/xboxCollection/', name, connectUrl, id, syncOptions),
         connect: (url = '/connect', name = '', id = '', syncOptions = {}) =>
             sync.connectAccountByUrl(url, name, id, syncOptions)
     };
 }
 
-test('Xbox: two disconnected collection views finish through one shared sign-in and each send a complete import', async () => {
+test('Xbox: two collection views without a grant share sign-in and each send a complete import', async () => {
     const background = backgroundFixture();
     const firstStarted = deferred();
     const bothStarted = deferred();
@@ -938,8 +928,8 @@ test('Xbox: two disconnected collection views finish through one shared sign-in 
         }
         return response;
     };
-    const first = contentFixture({ connection: { connected: false }, runtime });
-    const second = contentFixture({ connection: { connected: false }, runtime });
+    const first = contentFixture({ runtime });
+    const second = contentFixture({ runtime });
     const firstSync = first.run('Player', accountId, '/connect');
     await firstStarted.promise;
     const results = await Promise.all([firstSync, second.run('Player', accountId, '/connect')]);
@@ -1314,7 +1304,6 @@ test('Xbox: repeated syncs with a readable matching home session do not request 
     const f = contentFixture({ runtime: message => background.send(message) });
     await f.run('Player', accountId, '/connect');
     await f.run('Player', accountId, '/connect');
-    assert.equal(f.statusRequests.length, 2);
     assert.equal(f.events.filter(event => event === 'FETCH_XBOX_ACCOUNT').length, 2);
     assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
     assert.equal(f.prompts.length, 0);
@@ -1336,7 +1325,6 @@ test('Xbox: signing in once restores a readable home session and subsequent matc
     assert.equal(f.prompts.length, 1);
     assert.equal(f.events.filter(event => event === 'START_XBOX_AUTHORIZATION').length, 1);
     assert.equal(f.events.filter(event => event === 'POLL_XBOX_AUTHORIZATION').length, 1);
-    assert.equal(f.statusRequests.length, 2);
     assert.equal(f.events.filter(event => typeof event === 'object' && event.payload.complete).length, 2);
     assert.equal(background.tabs.length, 1);
 });
@@ -1374,48 +1362,6 @@ test('Xbox: recovering an unreadable home session reuses the saved grant without
     assert.deepEqual(f.prompts.map(prompt => prompt.confirmButtonText), ['Open Xbox.com']);
     assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
     assert.equal(f.events.filter(event => typeof event === 'object' && event.payload.complete).length, 1);
-    assert.equal(background.state().refreshToken, 'SECRET_REFRESH');
-});
-
-test('Xbox: a readable session uses the current server XUID rather than stale account attributes on the tile', async () => {
-    const background = backgroundFixture({ state: tokenState() });
-    const f = contentFixture({ connection: { connected: true, accountId, username: 'Player' },
-        runtime: message => background.send(message) });
-    await f.run('Stale tile account', '2533274790000002', '/connect');
-    assert.equal(f.statusRequests.length, 1);
-    assert.equal(f.prompts.length, 0);
-    const posts = f.events.filter(event => typeof event === 'object');
-    assert.equal(posts.length, 1);
-    assert.equal(posts[0].payload.accountId, accountId);
-    assert.equal(posts[0].payload.complete, true);
-});
-
-test('Xbox: a changed server XUID cannot reuse the tile account when Xbox.com is unreadable', async () => {
-    const background = backgroundFixture({ state: tokenState(), browserError: 'XBOX_BROWSER_SESSION_UNAVAILABLE' });
-    const f = contentFixture({ connection: { connected: true, accountId: '2533274790000002', username: 'Other account' },
-        runtime: message => background.send(message), loginConfirmed: false });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /Sync canceled:/);
-    assert.deepEqual(f.events, ['FETCH_XBOX_ACCOUNT', 'login']);
-    assert.equal(f.consentPrompts.length, 0);
-    assert.equal(background.events.some(event => event.url?.hostname === 'collections.mp.microsoft.com'), false);
-});
-
-test('Xbox: a remote disconnect clears the token even when the Xbox.com profile is unreadable', async () => {
-    const background = backgroundFixture({ state: tokenState(), browserError: 'XBOX_BROWSER_SESSION_UNAVAILABLE' });
-    const f = contentFixture({ connection: { connected: false }, runtime: message => background.send(message), loginConfirmed: false });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /Sync canceled:/);
-    assert.equal(background.state(), null);
-    assert.equal(f.prompts[0].confirmButtonText, 'Sign in to Xbox');
-    assert.equal(f.events.some(event => typeof event === 'object'), false);
-    assert.equal(background.events.some(event => event.url?.hostname === 'collections.mp.microsoft.com'), false);
-});
-
-test('Xbox: a failed server link check cannot fall back to the cached token when Xbox.com is unreadable', async () => {
-    const background = backgroundFixture({ state: tokenState(), browserError: 'XBOX_BROWSER_SESSION_UNAVAILABLE' });
-    const f = contentFixture({ statusError: new Error('HTTP 503'), runtime: message => background.send(message) });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /HTTP 503/);
-    assert.deepEqual(f.events, []);
-    assert.equal(background.events.length, 0);
     assert.equal(background.state().refreshToken, 'SECRET_REFRESH');
 });
 
@@ -1782,7 +1728,7 @@ function deferred() {
 }
 
 async function tileFixture({ needsLogin = false, accountError, pages = [[item]], pageError, importGate,
-    browserAccount, configuredAccountId = '', configuredUsername = '', connectUrl = null, connection } = {}) {
+    browserAccount, configuredAccountId = '', configuredUsername = '', connectUrl = null } = {}) {
     const events = [];
     const errors = [];
     let page = 0;
@@ -1790,7 +1736,6 @@ async function tileFixture({ needsLogin = false, accountError, pages = [[item]],
     const host = new TileElement('div', 'sync-box sync-32 connected extension-sync-btn action-box');
     host.attached = true;
     host.setAttribute('data-link-to-import', '/extensionImport/xboxCollection/');
-    host.setAttribute('data-connection-status-url', '/extensionImport/xboxConnection/');
     if (connectUrl) host.setAttribute('data-connect-url', connectUrl);
     host.setAttribute('data-account-id', configuredAccountId);
     host.setAttribute('data-username', configuredUsername);
@@ -1842,9 +1787,6 @@ async function tileFixture({ needsLogin = false, accountError, pages = [[item]],
         callSwal: ask,
         requestUserIdConsentViaPageSwal: (serviceName, accountLabel) => ask({ serviceName, accountLabel }),
         sendMessageToServer: async (url) => {
-            if (url.endsWith('/xboxConnection/')) return { success: true, data: connection ?? {
-                connected: true, accountId: configuredAccountId || '999', username: configuredUsername || 'Configured player'
-            } };
             events.push('post'); posting.resolve(); await importGate?.promise;
         },
         sendRuntimeMessage: async ({ type, currentPage, accountId: requestedAccountId }) => {
@@ -2525,196 +2467,119 @@ test('Xbox settings disconnect: Steam, Epic, PlayStation and Nintendo links reta
 });
 
 
-test('Xbox: a link disconnected in another profile deletes its grant before fresh authorization, consent and collection fetching', async () => {
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null } });
+test('Xbox: a matching account sync posts only the completed import without a connection preflight', async () => {
+    const f = contentFixture();
     await f.run('Player', accountId, '/connect');
-    assert.deepEqual(f.statusRequests, [{ url: 'https://gg.deals/extensionImport/xboxConnection/', payload: {} }]);
-    assert.deepEqual(f.events.slice(0, 8), ['DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login', 'START_XBOX_AUTHORIZATION',
-        'POLL_XBOX_AUTHORIZATION', 'CANCEL_XBOX_AUTHORIZATION', 'consent', {
-        url: 'https://gg.deals/connect', payload: { version: 'test', accountId, username: 'Player' }
-    }]);
-    assert.equal(f.events.filter((event) => event === 'consent').length, 1);
-    assert.equal(f.events.filter((event) => event === 'DISCONNECT_XBOX').length, 1);
+    assert.deepEqual(f.events.map(event => typeof event === 'object' ? event.url : event), [
+        'FETCH_XBOX_ACCOUNT', 'FETCH_XBOX_COLLECTION_PAGE', 'FETCH_XBOX_COLLECTION_PAGE',
+        'https://gg.deals/extensionImport/xboxCollection/'
+    ]);
+    assert.equal(f.prompts.length, 0);
+    assert.equal(f.consentPrompts.length, 0);
     assert.equal(f.events.at(-1).payload.complete, true);
 });
 
-test('Xbox: a disconnected link confirms the current browser account rather than the stale tile account', async () => {
-    const otherAccount = { accountId: '2533274790000002', username: 'Other player' };
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null },
-        browserAccount: otherAccount, authorizedAccount: otherAccount });
+test('Xbox: a page without linked-account metadata confirms and connects a usable account before fetching', async () => {
+    const f = contentFixture();
+    await f.run('', '', '/connect');
+    assert.deepEqual(f.events.slice(0, 4), ['FETCH_XBOX_ACCOUNT', 'consent', {
+        url: 'https://gg.deals/connect', payload: { version: 'test', accountId, username: 'Player' }
+    }, 'FETCH_XBOX_COLLECTION_PAGE']);
+    assert.equal(f.events.includes('DISCONNECT_XBOX'), false);
+    assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
+    assert.equal(f.events.at(-1).payload.complete, true);
+});
+
+test('Xbox: a link removed during pagination uses shared consent and retries the same snapshot with its saved grant', async () => {
+    const background = backgroundFixture({ state: tokenState() });
+    const f = contentFixture({ importError: Object.assign(new Error(`Invalid accountId: ${accountId}.`), { serverCode: 2 }),
+        runtime: message => background.send(message) });
     await f.run('Player', accountId, '/connect');
-    assert.deepEqual(clone(f.consentPrompts), [{ serviceName: 'Xbox',
-        accountLabel: `Other player (ID: ${otherAccount.accountId})` }]);
-    const posts = f.events.filter((event) => typeof event === 'object');
-    assert.equal(posts.length, 2);
-    assert.equal(posts.every((post) => post.payload.accountId === otherAccount.accountId), true);
-    assert.equal(f.events.indexOf('DISCONNECT_XBOX') < f.events.indexOf('START_XBOX_AUTHORIZATION'), true);
-    assert.equal(f.events.indexOf('START_XBOX_AUTHORIZATION') < f.events.indexOf('consent'), true);
-});
-
-test('Xbox: declining a disconnected account sends no connection or collection and removes the stale grant', async () => {
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, consent: false });
-    await assert.rejects(f.run('Player', accountId, '/connect'), { message: 'Sync canceled: account not confirmed', serverCode: 5 });
-    assert.deepEqual(f.events, ['DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login', 'START_XBOX_AUTHORIZATION',
-        'POLL_XBOX_AUTHORIZATION', 'CANCEL_XBOX_AUTHORIZATION', 'consent', 'DISCONNECT_XBOX']);
-});
-
-test('Xbox: a disconnected server link deletes the grant even when a reloaded tile has no old account metadata', async () => {
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, loginConfirmed: false });
-    await assert.rejects(f.run('', '', '/connect'), /Sync canceled:/);
-    assert.deepEqual(f.events, ['DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login']);
-});
-
-test('Xbox: a credential deletion failure stops remote reconnection before any authorization or import', async () => {
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, runtime: async () =>
-        ({ ok: false, error: 'Xbox credential storage failed' }) });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /credential storage failed/);
-    assert.deepEqual(f.events, ['DISCONNECT_XBOX']);
-});
-
-test('Xbox: a failed reconnection after a remote disconnect stops before collection fetching', async () => {
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, connectError: 'HTTP 503' });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /HTTP 503/);
-    assert.equal(f.events.includes('consent'), true);
-    assert.equal(f.events.includes('FETCH_XBOX_COLLECTION_PAGE'), false);
-    assert.equal(f.events.filter((event) => typeof event === 'object').length, 1);
-});
-
-test('Xbox: fresh server account metadata replaces a stale tile before account confirmation', async () => {
-    const f = contentFixture({ connection: { connected: true, accountId, username: 'Player' } });
-    await f.run('Stale player', '999', '/connect');
-    assert.equal(f.statusRequests.length, 1);
-    assert.equal(f.events.includes('consent'), false);
-    assert.equal(f.events.filter((event) => typeof event === 'object' && event.url.endsWith('/connect')).length, 0);
-    assert.equal(f.events.at(-1).payload.accountId, accountId);
-});
-
-for (const [name, options] of [
-    ['failed status request', { statusError: new Error('HTTP 503') }],
-    ['malformed status response', { statusResponse: {} }],
-    ['invalid saved XUID', { statusResponse: { success: true, data: { connected: true, accountId: 123, username: 'Player' } } }]
-]) {
-    test(`Xbox: ${name} stops before Microsoft requests and retains the local grant`, async () => {
-        const f = contentFixture(options);
-        await assert.rejects(f.run('Player', accountId, '/connect'));
-        assert.equal(f.statusRequests.length, 1);
-        assert.deepEqual(f.events, []);
-    });
-}
-
-for (const serverCode of [5, '5']) {
-    test(`Xbox: import error code ${JSON.stringify(serverCode)} after pagination clears the grant, authorizes and fetches a fresh complete snapshot once`, async () => {
-        const importError = Object.assign(new Error('Invalid accountId: disconnected'), { serverCode });
-        const f = contentFixture({ importError });
-        await f.run('Player', accountId, '/connect');
-        assert.deepEqual(f.events.map((event) => typeof event === 'object' ? event.url : event), [
-            'FETCH_XBOX_ACCOUNT', 'FETCH_XBOX_COLLECTION_PAGE', 'FETCH_XBOX_COLLECTION_PAGE',
-            'https://gg.deals/extensionImport/xboxCollection/', 'DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login',
-            'START_XBOX_AUTHORIZATION', 'POLL_XBOX_AUTHORIZATION', 'CANCEL_XBOX_AUTHORIZATION', 'consent',
-            'https://gg.deals/connect', 'FETCH_XBOX_COLLECTION_PAGE', 'FETCH_XBOX_COLLECTION_PAGE',
-            'https://gg.deals/extensionImport/xboxCollection/'
-        ]);
-        const posts = f.events.filter((event) => typeof event === 'object');
-        assert.equal(posts[0].payload.complete, true);
-        assert.deepEqual(posts[0].payload, posts[2].payload);
-        assert.deepEqual(posts[1].payload, { version: 'test', accountId, username: 'Player' });
-    });
-}
-
-test('Xbox: declining reconnection after pagination sends no connection or import retry', async () => {
-    const f = contentFixture({ consent: false, importError: Object.assign(new Error('Disconnected'), { serverCode: 5 }) });
-    await assert.rejects(f.run('Player', accountId, '/connect'), { message: 'Sync canceled: account not confirmed', serverCode: 5 });
-    assert.equal(f.events.filter((event) => event === 'consent').length, 1);
-    assert.equal(f.events.filter((event) => typeof event === 'object').length, 1);
-    assert.equal(f.events.at(-1), 'DISCONNECT_XBOX');
-});
-
-test('Xbox: choosing another account after revocation discards the old snapshot and imports only the newly authorized collection', async () => {
-    const otherAccount = { accountId: '2533274790000002', username: 'Other player' };
-    const otherItem = { ...item, productId: '9N0QWXC09MPT' };
-    const f = contentFixture({ authorizedAccount: otherAccount,
-        importError: Object.assign(new Error('Disconnected'), { serverCode: 5 }),
-        collections: { [accountId]: [[item], [item]], [otherAccount.accountId]: [[otherItem]] } });
-    const result = await f.run('Player', accountId, '/connect');
-    assert.deepEqual(clone(result), otherAccount);
-    const posts = f.events.filter((event) => typeof event === 'object');
-    assert.equal(posts[0].payload.accountId, accountId);
-    assert.deepEqual(posts[1].payload, { version: 'test', ...otherAccount });
-    assert.equal(posts[2].payload.accountId, otherAccount.accountId);
-    assert.equal(posts[2].payload.pagesCount, 1);
-    assert.equal(posts[2].payload.totalItems, 1);
-    assert.deepEqual(posts[2].payload.data, [{ items: [otherItem] }]);
+    assert.deepEqual(f.events.map(event => typeof event === 'object' ? event.url : event), [
+        'FETCH_XBOX_ACCOUNT', 'FETCH_XBOX_COLLECTION_PAGE', 'https://gg.deals/extensionImport/xboxCollection/',
+        'consent', 'https://gg.deals/connect', 'https://gg.deals/extensionImport/xboxCollection/'
+    ]);
+    const posts = f.events.filter(event => typeof event === 'object');
+    assert.deepEqual(posts[0].payload, posts[2].payload);
+    assert.deepEqual(posts[1].payload, { version: 'test', accountId, username: 'Player', overwrite: true });
+    assert.equal(background.state().refreshToken, 'SECRET_REFRESH');
+    assert.equal(background.tabs.length, 0);
     assertNoCredentials(posts);
 });
 
-test('Xbox: repeated revocation stops after one explicit reconnection and one import retry', async () => {
-    const f = contentFixture({ importError: Object.assign(new Error('Disconnected'), { serverCode: 5 }), repeatImportError: true });
-    await assert.rejects(f.run('Player', accountId, '/connect'), { serverCode: 5 });
-    const posts = f.events.filter((event) => typeof event === 'object');
+test('Xbox: declining shared recovery after pagination preserves the grant and sends no connect or import retry', async () => {
+    const background = backgroundFixture({ state: tokenState() });
+    const f = contentFixture({ consent: false,
+        importError: Object.assign(new Error(`Invalid accountId: ${accountId}.`), { serverCode: 2 }),
+        runtime: message => background.send(message) });
+    await assert.rejects(f.run('Player', accountId, '/connect'), { message: 'Sync canceled: account not confirmed' });
+    assert.equal(f.consentPrompts.length, 1);
+    assert.equal(f.events.filter(event => typeof event === 'object').length, 1);
+    assert.equal(f.events.at(-1), 'consent');
+    assert.equal(f.events.includes('DISCONNECT_XBOX'), false);
+    assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
+    assert.equal(background.state().refreshToken, 'SECRET_REFRESH');
+});
+
+test('Xbox: a failed shared reconnect stops without retrying or fetching another snapshot', async () => {
+    const f = contentFixture({ connectError: 'HTTP 503',
+        importError: Object.assign(new Error(`Invalid accountId: ${accountId}.`), { serverCode: 2 }) });
+    await assert.rejects(f.run('Player', accountId, '/connect'), /HTTP 503/);
+    assert.equal(f.consentPrompts.length, 1);
+    assert.deepEqual(f.events.filter(event => typeof event === 'object').map(event => event.url), [
+        'https://gg.deals/extensionImport/xboxCollection/', 'https://gg.deals/connect'
+    ]);
+    assert.equal(f.events.filter(event => event === 'FETCH_XBOX_ACCOUNT').length, 1);
+    assert.equal(f.events.filter(event => event === 'FETCH_XBOX_COLLECTION_PAGE').length, 2);
+    assert.equal(f.events.includes('DISCONNECT_XBOX'), false);
+    assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
+});
+
+test('Xbox: a repeated account mismatch stops after one shared reconnect and one import retry', async () => {
+    const importError = Object.assign(new Error(`Invalid accountId: ${accountId}.`), { serverCode: 2 });
+    const f = contentFixture({ importError, repeatImportError: true });
+    await assert.rejects(f.run('Player', accountId, '/connect'), error => error === importError);
+    const posts = f.events.filter(event => typeof event === 'object');
     assert.equal(posts.length, 3);
-    assert.equal(f.events.filter((event) => event === 'consent').length, 1);
-    assert.equal(f.events.at(-1), 'DISCONNECT_XBOX');
+    assert.deepEqual(posts[0].payload, posts[2].payload);
+    assert.equal(f.consentPrompts.length, 1);
+    assert.equal(f.events.includes('DISCONNECT_XBOX'), false);
+    assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
 });
 
-test('Xbox: a disconnected import without a connect URL does not retry or bypass the server link', async () => {
-    const f = contentFixture({ importError: Object.assign(new Error('Disconnected'), { serverCode: 5 }) });
-    await assert.rejects(f.run('Player', accountId), { serverCode: 5 });
-    assert.equal(f.events.includes('consent'), false);
-    assert.equal(f.events.filter((event) => typeof event === 'object').length, 1);
-    assert.equal(f.events.at(-1), 'DISCONNECT_XBOX');
-});
-
-test('Xbox: declining remote reconnection deletes real credentials without fetching a collection', async () => {
-    const background = backgroundFixture({ state: tokenState() });
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, consent: false,
-        runtime: (message) => {
-            if (message.type === 'POLL_XBOX_AUTHORIZATION') background.advance(5000);
-            return background.send(message);
-        } });
-    await assert.rejects(f.run('Player', accountId, '/connect'), { message: 'Sync canceled: account not confirmed', serverCode: 5 });
-    assert.equal(background.state(), null);
-    assert.equal(background.events.some((event) => event.url?.hostname === 'collections.mp.microsoft.com'), false);
-    assert.deepEqual(f.events, ['DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login', 'START_XBOX_AUTHORIZATION',
-        'POLL_XBOX_AUTHORIZATION', 'CANCEL_XBOX_AUTHORIZATION', 'consent', 'DISCONNECT_XBOX']);
-});
-
-test('Xbox: remote disconnect clears real stored and cached credentials before offering Microsoft authorization', async () => {
-    const background = backgroundFixture({ state: tokenState() });
-    await background.send({ type: 'FETCH_XBOX_ACCOUNT' });
-    assert.equal(background.state().xuid, accountId);
-    background.events.length = 0;
-    const f = contentFixture({ connection: { connected: false, accountId: null, username: null }, loginConfirmed: false,
-        runtime: (message) => background.send(message) });
-    await assert.rejects(f.run('Player', accountId, '/connect'), /Sync canceled:/);
-    assert.equal(background.state(), null);
-    assert.equal(background.events.some((event) => event.type === 'fetch'), false);
-    assert.equal(background.tabs.length, 0);
-    assert.deepEqual(f.events, ['DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'login', 'DISCONNECT_XBOX']);
-});
-
-for (const connectionStatusUrl of [undefined, 'https://other.example/status']) {
-    test(`Xbox: ${connectionStatusUrl ? 'cross-origin' : 'missing'} status URL stops before Microsoft or server traffic`, async () => {
-        const f = contentFixture();
-        await assert.rejects(f.run('Player', accountId, '/connect', { connectionStatusUrl }));
-        assert.deepEqual(f.events, []);
-        assert.deepEqual(f.statusRequests, []);
+for (const serverCode of [1, 3, 4, 5, '5', 999]) {
+    test(`Xbox: an import error with code ${JSON.stringify(serverCode)} preserves the original error without token resets or sign-in`, async () => {
+        const importError = Object.assign(new Error('Import failed'), { serverCode });
+        const f = contentFixture({ importError });
+        await assert.rejects(f.run('Player', accountId, '/connect'), error => error === importError);
+        assert.equal(f.events.filter(event => typeof event === 'object').length, 1);
+        assert.equal(f.consentPrompts.length, 0);
+        assert.equal(f.prompts.length, 0);
+        assert.equal(f.events.includes('DISCONNECT_XBOX'), false);
+        assert.equal(f.events.includes('START_XBOX_AUTHORIZATION'), false);
     });
 }
 
+test('Xbox: a cross-origin import URL is rejected before accessing credentials or sending server requests', async () => {
+    const f = contentFixture({ importUrl: 'https://other.example/import' });
+    await assert.rejects(f.run('Player', accountId, '/connect'), /Xbox URL must belong to GG.deals/);
+    assert.deepEqual(f.events, []);
+});
 
-test('Xbox tile: declining remote reconnection restores Connect and clears stale metadata without an error toast', async () => {
-    const f = await tileFixture({ configuredAccountId: accountId, configuredUsername: 'Player', connectUrl: '/connect',
-        connection: { connected: false, accountId: null, username: null } });
+test('Xbox tile: declining first account confirmation restores the tile without clearing metadata or showing an error', async () => {
+    const f = await tileFixture({ configuredAccountId: '', configuredUsername: '', connectUrl: '/connect' });
+    f.host.classList.remove('connected');
+    f.host.querySelector('.action-bottom-text').textContent = 'Connect';
     const syncing = f.click();
     f.bridge.resolve();
     await f.shown;
-    assert.deepEqual(f.events, ['bridge', 'DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'prompt']);
+    assert.deepEqual(f.events, ['bridge', 'FETCH_XBOX_ACCOUNT', 'prompt']);
     f.prompt.resolve(false);
     await syncing;
-    assert.deepEqual(f.events, ['bridge', 'DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'prompt', 'DISCONNECT_XBOX', 'unmark']);
+    assert.deepEqual(f.events, ['bridge', 'FETCH_XBOX_ACCOUNT', 'prompt', 'unmark']);
     assert.deepEqual(f.errors, []);
-    assert.equal(f.host.getAttribute('data-account-id'), null);
-    assert.equal(f.host.getAttribute('data-username'), null);
+    assert.equal(f.host.getAttribute('data-account-id'), '');
+    assert.equal(f.host.getAttribute('data-username'), '');
     assert.equal(f.host.querySelector('.action-bottom-text').textContent, 'Connect');
     assert.equal(f.host.classList.contains('connected'), false);
     assert.equal(f.host.classList.contains('new'), false);
@@ -2722,9 +2587,8 @@ test('Xbox tile: declining remote reconnection restores Connect and clears stale
     assert.equal(f.progressListeners.size, 0);
 });
 
-test('Xbox tile: accepting remote reconnection connects and queues the collection in the same click without an error toast', async () => {
-    const f = await tileFixture({ configuredAccountId: accountId, configuredUsername: 'Player', connectUrl: '/connect',
-        connection: { connected: false, accountId: null, username: null } });
+test('Xbox tile: missing credentials sign in, confirm, connect and queue in the same click without a status endpoint', async () => {
+    const f = await tileFixture({ needsLogin: true, configuredAccountId: '', configuredUsername: '', connectUrl: '/connect' });
     const syncing = f.click();
     f.bridge.resolve();
     await f.shown;
@@ -2739,7 +2603,7 @@ test('Xbox tile: accepting remote reconnection connects and queues the collectio
     f.authorization.resolve({ accountId, username: 'Player' });
     await syncing;
     assert.deepEqual(f.prompts[1], { serviceName: 'Xbox', accountLabel: `Player (ID: ${accountId})` });
-    assert.deepEqual(f.events, ['bridge', 'DISCONNECT_XBOX', 'FETCH_XBOX_ACCOUNT', 'prompt', 'START_XBOX_AUTHORIZATION',
+    assert.deepEqual(f.events, ['bridge', 'FETCH_XBOX_ACCOUNT', 'prompt', 'START_XBOX_AUTHORIZATION',
         'POLL_XBOX_AUTHORIZATION', 'CANCEL_XBOX_AUTHORIZATION', 'prompt', 'post', 'FETCH_XBOX_COLLECTION_PAGE', 'post', 'queued']);
     assert.equal(f.host.classList.contains('queued'), true);
     assert.equal(f.host.getAttribute('data-account-id'), accountId);

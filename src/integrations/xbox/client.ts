@@ -455,8 +455,8 @@ export class XboxCollectionClient {
 
     async disconnect(keepPendingAuthorization = false): Promise<void> {
         this.cachedCredentials = null;
-        // A Connect or an unlinked GG.deals status must clear old tokens, but
-        // must not cancel a fresh sign-in already shared by other GG.deals tabs.
+        // Preparing a Connect clears old tokens without canceling a fresh
+        // sign-in already shared by other GG.deals tabs.
         // An actual Disconnect always removes the entire authorization.
         if (keepPendingAuthorization && (await this.read())?.kind === 'device') return;
         await this.dependencies.write(null);
