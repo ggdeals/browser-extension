@@ -23,45 +23,10 @@ The extension asks for `storage` and access to all `https://` sites. The broad
 host access is what lets the price bar recognise product pages across the stores
 listed in `src/manifest.json`.
 
-Xbox sync works differently from the other providers. Instead of reusing the
-store's browser session, it signs in to Microsoft once (in a tab opened after the
-user confirms) and keeps the resulting token in the extension's own storage. The
-token is never sent to GG.deals or page scripts and is deleted on disconnect.
-Every collection sync uses the account metadata rendered by GG.deals and requests
-`https://www.xbox.com/en-us/home_alt/dark/home` with fresh Xbox.com cookies. Its
-`user.isSignedIn` and `user.userInfo.xuid` identify the active session; the viewed
-profile URL and the anonymous `play.xbox.com` SSR page are not used as identity.
-A matching signed-in session reuses the saved grant without another prompt.
-Signing out stops sync before collection requests, even if the OAuth grant is
-still valid. A readable session with a different XUID uses the shared account
-confirmation and Microsoft authorization flow.
-
-A token for a different XUID than the configured account requires fresh
-authorization. Account confirmation, connection and recovery from the server's
-`Invalid accountId:` response use the same helper as the other integrations:
-after consent, the extension reconnects and retries the completed import once.
-There is no separate connection-status request or automatic token reset on an
-import error. Explicit Connect and Disconnect still clear the saved token.
-If the Xbox.com session
-cannot be read while the grant is usable, the extension keeps the grant and asks
-the user to open Xbox.com before retrying. Reauthorizing Microsoft would not fix
-the unreadable session and could repeat on every click. The extension does not
-import with an unverified cached account. After a fresh Microsoft sign-in needed
-for a missing or invalid grant, that sync may proceed without another Xbox.com
-check. Xbox sync is unavailable in private
-browsing, so private tabs cannot use the normal profile's token.
-
-Concurrent sign-ins share one Microsoft tab and device grant. Each sync has its
-own subscription, so canceling one does not cancel the others. The shared result
-survives a background worker restart. Disconnect cancels all subscriptions and
-deletes the token; starting a connection clears saved tokens while preserving
-an unfinished sign-in already in progress in another tab.
-
-If Microsoft rejects the extension's Origin during a token exchange, the
-background retries that request once with an empty Origin header using its
-existing host access. Browsers that do not support overriding the header report
-the transport error and retain the grant. This requires no technical tabs,
-additional permissions or backend token proxy.
+Xbox sync signs in to Microsoft once and keeps the token in the extension's own
+storage. The token is never sent to GG.deals and is deleted on disconnect. Like
+the other providers, sync requires an active store session (Xbox.com), and it is
+not available in private browsing.
 
 ## Build
 
@@ -93,9 +58,8 @@ account mismatch recovery, import payloads, and selected button and settings
 state transitions. Epic wishlist tests also cover store session refresh, waiting
 for authenticated data, refresh timeouts and temporary tab cleanup.
 They make no network requests and require no real accounts.
-Xbox tests additionally cover device authorization, token rotation and isolation,
-worker restarts, concurrent background requests, pagination and complete imports.
-Other providers' background API pagination and visual browser behaviour need separate checks.
+Xbox tests also cover Microsoft sign-in, token refresh and API pagination.
+Other providers' API pagination and visual browser behaviour need separate checks.
 Type checking is performed by `npm run build:all`, separately from these tests.
 
 ## Load the Extension in Chrome (Unpacked)
