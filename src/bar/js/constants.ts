@@ -3,7 +3,6 @@ export const API_URL: string = 'https://api.gg.deals/extension/bar/game/';
 export const API_GAMES_URL: string = 'https://api.gg.deals/extension/bar/games/';
 
 export const WINGAMESTORE_PRODUCT_URL_PREFIX = 'https://www.wingamestore.com/product/';
-export const HUMBLE_STORE_PRODUCT_URL_PREFIX = 'https://www.humblebundle.com/store/';
 export const TRZYKROPKI_PRODUCT_PREFIX = 'https://www.3kropki.pl/p/';
 export const GAMESPORIUM_PRODUCTS_PREFIX = 'https://gamesporium.com/products/';
 

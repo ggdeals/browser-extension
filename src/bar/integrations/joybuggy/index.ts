@@ -1,7 +1,7 @@
 import type { DomainPageRule } from '../types';
 
 export const resolveJoybuggyTitle = (): string | null => {
-    const heading = document.querySelector('h1.jb-product-title[itemprop="name"]') as HTMLHeadingElement | null;
+    const heading = document.querySelector('h5');
     const title = heading?.textContent?.trim();
     return title && title.length > 0 ? title : null;
 };
