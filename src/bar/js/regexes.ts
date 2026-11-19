@@ -13,6 +13,9 @@ export const GAMERSGATE_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?gamersgate\.com\/
 export const GAMERS_OUTLET_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?gamers-outlet\.net\/[a-z]{2}\/[^/?#]+\/?(?:[?#].*)?$/i;
 export const GAMERALL_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?gamerall\.com\//i; // Product pages are not always in the same format, so we will just check for the domain. The bar will only show on product pages
 export const JOYBUGGY_PREFIX = /^https:\/\/(?:www\.)?joybuggy\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?[^/?#]+\/?(?:[?#].*)?$/i; // Product eligibility is confirmed by the domain integration.
+export const ZAPAGAMES_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?zapagames\.com\/(?:buy-[^/?#]+\/?(?:[?#].*)?|index\.php\?(?=(?:[^&#]*&)*route=product(?:\/|%2f)product(?:[&#]|$))(?=(?:[^&#]*&)*product_id=\d+(?:[&#]|$))[^#]+(?:#.*)?)$/i;
+export const BITCODES_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?bitcodes\.co\/product\/[^/?#]+\/?(?:[?#].*)?$/i;
+export const EWW_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?eww\.gg\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?[^/?#]+-\d+\/?(?:[?#].*)?$/i;
 export const GAMEBOOST_PRODUCT_PREFIX = /^https:\/\/gameboost\.com\/[^/?#]+-00-\d+\/?(?:[?#].*)?$/i;
 export const DRIFFLE_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?driffle\.com\/(?:[a-z]{2}(?:[-_][a-z]{2})?\/)?[^/?#]+-p\d+\/?(?:[?#].*)?$/i;
 export const DISCOVER_GAMES_PRODUCT_PREFIX = /^https:\/\/(?:www\.)?discover\.games\/games\/[^/?#]+\/?(?:[?#].*)?$/i;

@@ -55,6 +55,9 @@ import { hypeGamesPageRule } from './hypegames';
 import { indiegalaPageRule } from './indiegala';
 import { instantGamingPageRule } from './instantgaming';
 import { joybuggyPageRule } from './joybuggy';
+import { zapaGamesPageRule } from './zapagames';
+import { bitcodesPageRule } from './bitcodes';
+import { ewwPageRule } from './eww';
 import { k4gPageRule } from './k4g';
 import { muvePageRules } from './muve';
 import { nuuvemPageRule } from './nuuvem';
@@ -145,6 +148,9 @@ const DOMAIN_PAGE_RULES: DomainPageRule[] = [
     indiegalaPageRule,
     instantGamingPageRule,
     joybuggyPageRule,
+    zapaGamesPageRule,
+    bitcodesPageRule,
+    ewwPageRule,
     k4gPageRule,
     ...muvePageRules,
     nuuvemPageRule,
